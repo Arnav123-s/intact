@@ -1,0 +1,14 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+.vscode/
+.idea/
+*.clean.csv
+*.quarantine.csv
+*.provenance.csv
+audit-log.jsonl

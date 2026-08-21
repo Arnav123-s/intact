@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "intact"
+version = "0.1.0"
+description = "Detects data corruption that does not raise an exception."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+authors = [{ name = "Arnav Sinha" }]
+keywords = ["data-quality", "mojibake", "encoding", "csv", "etl", "pdf", "spark"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Database",
+    "Topic :: Software Development :: Quality Assurance",
+]
+dependencies = []
+
+[project.optional-dependencies]
+spark = ["pyspark>=3.4"]
+
+[tool.setuptools.packages.find]
+include = ["intact*"]
