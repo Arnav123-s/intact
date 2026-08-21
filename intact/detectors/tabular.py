@@ -100,6 +100,29 @@ def _is_numeric(value: str) -> bool:
     return bool(_NUMERIC.match(value.strip()))
 
 
+# A number wearing display formatting: thousands separators, a currency symbol, a
+# trailing percent, or parenthesised negatives from a spreadsheet export.
+_FORMATTED_NUMBER = re.compile(
+    r"""^\s*(
+        [-+]?[\$£€¥]\s?[\d,]+(\.\d+)?      |   # $1,234.56
+        [-+]?\d{1,3}(,\d{3})+(\.\d+)?      |   # 1,234,567
+        \(\s*[\$£€¥]?[\d,]+(\.\d+)?\s*\)   |   # (1,234)  negative
+        [-+]?[\d,]+(\.\d+)?\s?%                # 12.5%
+    )\s*$""",
+    re.X,
+)
+
+
+def _is_formatted_number(value: str) -> bool:
+    """True for a number that has been formatted for display rather than storage.
+
+    This is the distinction that makes the check useful: a CSV holding `1234` is
+    just an untyped file, but a CSV holding `1,234` has had a display format baked
+    into the data, and every cast downstream will fail on it.
+    """
+    return bool(_FORMATTED_NUMBER.match(value))
+
+
 def audit_column(
     name: str, values: Sequence[str], thresholds: dict[str, float] | None = None
 ) -> AuditResult:
@@ -139,21 +162,37 @@ def audit_column(
                 samples=tuple(s for s, _ in hits.most_common(5)),
             ))
 
-    # --- numbers stored as text
+    # --- numbers carrying display formatting
+    #
+    # NOT "numbers stored as text". In a CSV every value is text — there are no
+    # types — so flagging every numeric column would fire on every ID and every
+    # amount in every file ever written, which is noise, not a finding.
+    #
+    # What is actually worth reporting is a number carrying DISPLAY FORMATTING:
+    # thousands separators, a currency symbol, a trailing percent. Those mean the
+    # value was formatted for a human, and any downstream cast will fail or silently
+    # produce nulls. A bare "1234" needs no warning; "1,234" does.
     if judged and non_empty:
+        formatted = [v for v in non_empty if _is_formatted_number(v)]
         numeric = sum(1 for v in non_empty if _is_numeric(v))
-        ratio = numeric / len(non_empty)
-        if ratio >= t["numeric_as_text"] and numeric >= MIN_ROWS_FOR_STATS:
+        ratio = len(formatted) / len(non_empty)
+        if ratio >= t["numeric_as_text"] and len(formatted) >= MIN_ROWS_FOR_STATS:
+            example = formatted[0]
             findings.append(Finding(
                 mode="numeric_as_text", severity=Severity.SUSPECT,
                 location=f"column {name!r}", metric=ratio,
                 threshold=t["numeric_as_text"],
                 detail=(
-                    f"{ratio:.0%} of values parse as numbers but are stored as text — "
-                    f"aggregations over this column will be wrong or silently skipped"
+                    f"{ratio:.0%} of values are numbers carrying display formatting "
+                    f"(e.g. {example!r}) — a cast to a numeric type will fail or "
+                    f"silently produce nulls, and aggregations will be wrong"
                 ),
-                samples=tuple(v for v in non_empty[:5]),
+                samples=tuple(formatted[:5]),
             ))
+        elif numeric == len(non_empty) and numeric >= MIN_ROWS_FOR_STATS:
+            # Every value is a clean number. Worth knowing when the source HAS types
+            # and chose text anyway; not worth saying about a CSV, which cannot.
+            pass
 
     # --- truncation at a VARCHAR limit
     #

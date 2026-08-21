@@ -141,21 +141,59 @@ class Solution:
 # --- detection that leads to an action, not a message ---------------------------
 
 
+def _looks_like_utf16(raw: bytes) -> bool:
+    """UTF-16 text is full of null bytes; ASCII and UTF-8 are not.
+
+    This guard exists because of a real bug. Scoring encodings purely by mojibake
+    markers let UTF-16 win on plain ASCII: decoding ASCII as UTF-16 produces
+    CJK-looking characters that contain no mojibake markers at all, so it scored
+    zero — a perfect score — and the file was silently turned into garbage.
+
+    A byte-order mark is decisive. Failing that, real UTF-16 of mostly-Latin text has
+    a null byte for roughly every other character; anything under a third is not
+    UTF-16 whatever it decodes to.
+    """
+    if raw[:2] in (b"\xff\xfe", b"\xfe\xff"):
+        return True
+    sample = raw[:4096]
+    if not sample:
+        return False
+    return sample.count(0) / len(sample) > 0.30
+
+
 def detect_encoding(raw: bytes) -> tuple[str, int]:
     """Pick the encoding that decodes with the least damage.
 
     Scored by mojibake markers and replacement characters rather than by whether the
     decode raises — latin-1 decodes anything without error and is wrong most of the
     time, so "it didn't throw" is not evidence.
+
+    Ties go to the earlier candidate, because `_ENCODINGS` is ordered by how likely
+    each is in practice.
     """
+    # A byte-order mark is not a hint, it is a declaration. Nothing else gets a vote,
+    # because every 8-bit codec will happily decode UTF-16 bytes into scoreless
+    # garbage and win on a tie.
+    if raw[:2] in (b"\xff\xfe", b"\xfe\xff"):
+        return "utf-16", 0
+    if raw[:3] == b"\xef\xbb\xbf":
+        return "utf-8-sig", 0
+
     best, best_score = "utf-8", 10**9
+    utf16_plausible = _looks_like_utf16(raw)
+
     for enc in _ENCODINGS:
+        # utf-8-sig is only meaningful with a BOM, which is handled above; without
+        # one it is just utf-8 and reporting it would misdescribe the file.
+        if enc == "utf-8-sig":
+            continue
+        if enc == "utf-16" and not utf16_plausible:
+            continue
         try:
             text = raw.decode(enc)
         except (UnicodeDecodeError, LookupError):
             continue
         score = sum(text.count(m) for m in _MOJIBAKE_MARKERS)
-        # Prefer earlier candidates on a tie: they are the more likely encodings.
         if score < best_score:
             best, best_score = enc, score
     return best, best_score

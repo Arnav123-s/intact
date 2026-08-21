@@ -18,12 +18,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from intact.core import Severity, summarise  # noqa: E402
 from intact.detectors.text import (  # noqa: E402
     MIN_TOKENS_FOR_STATS,
     Mode,
-    Severity,
+    audit_pages,
     audit_text,
-    summarise,
 )
 
 # Academic-flavoured prose: prose, figures, years, decimals. Repeated to clear the
@@ -80,7 +80,7 @@ def test_missing_glyph_is_detected():
     """A font lacking 'c' turns every c into a replacement char."""
     r = audit_text(CLEAN.replace("c", "�"))
     assert r.severity is Severity.CORRUPT, r
-    assert any(f.mode is Mode.MISSING_GLYPH for f in r.findings)
+    assert any(f.mode == Mode.MISSING_GLYPH.value for f in r.findings)
     assert not r.is_usable
 
 
@@ -88,12 +88,12 @@ def test_unmapped_cid_markers_are_detected():
     """pdfminer emits (cid:NNN) when a glyph has no ToUnicode entry."""
     text = CLEAN.replace("the", "(cid:87)")
     r = audit_text(text)
-    assert any(f.mode is Mode.MISSING_GLYPH for f in r.findings), r
+    assert any(f.mode == Mode.MISSING_GLYPH.value for f in r.findings), r
 
 
 def test_glyph_evidence_names_the_character():
     r = audit_text(CLEAN.replace("e", "�"))
-    finding = next(f for f in r.findings if f.mode is Mode.MISSING_GLYPH)
+    finding = next(f for f in r.findings if f.mode == Mode.MISSING_GLYPH)
     assert finding.samples, "a finding with no evidence is not actionable"
     assert "U+FFFD" in finding.samples
 
@@ -104,7 +104,7 @@ def test_glyph_evidence_names_the_character():
 def test_heavy_shattering_is_corrupt():
     r = audit_text(_shatter(CLEAN, 0.6))
     assert r.severity is Severity.CORRUPT, r
-    assert any(f.mode is Mode.SHATTERED_WORDS for f in r.findings)
+    assert any(f.mode == Mode.SHATTERED_WORDS.value for f in r.findings)
 
 
 def test_moderate_shattering_is_corrupt():
@@ -133,7 +133,7 @@ def test_light_shattering_is_at_least_suspect():
 def test_shatter_evidence_shows_runs_not_single_tokens():
     """The run is the evidence; an isolated short word proves nothing."""
     r = audit_text(_shatter(CLEAN, 0.6))
-    finding = next(f for f in r.findings if f.mode is Mode.SHATTERED_WORDS)
+    finding = next(f for f in r.findings if f.mode == Mode.SHATTERED_WORDS)
     assert finding.samples
     assert any(" " in s for s in finding.samples), finding.samples
 
@@ -145,7 +145,7 @@ def test_digits_as_control_bytes_are_detected():
     """The dangerous one: prose reads fine, every number is gone."""
     text = "".join("\x01" if ch.isdigit() else ch for ch in CLEAN)
     r = audit_text(text)
-    assert any(f.mode is Mode.NUMERIC_LOSS for f in r.findings), r
+    assert any(f.mode == Mode.NUMERIC_LOSS.value for f in r.findings), r
     assert r.severity is Severity.CORRUPT
 
 
@@ -154,8 +154,8 @@ def test_numeric_loss_flagged_even_when_prose_is_intact():
     text = "".join(" " if ch.isdigit() else ch for ch in CLEAN)
     r = audit_text(text)
     modes = {f.mode for f in r.findings}
-    assert Mode.NUMERIC_LOSS in modes, r
-    assert Mode.MISSING_GLYPH not in modes, "no undecodable chars were introduced"
+    assert Mode.NUMERIC_LOSS.value in modes, r
+    assert Mode.MISSING_GLYPH.value not in modes, "no undecodable chars were introduced"
 
 
 # --- refusing to judge -----------------------------------------------------------
@@ -164,15 +164,15 @@ def test_numeric_loss_flagged_even_when_prose_is_intact():
 def test_short_text_is_not_judged_on_statistics():
     """Below the minimum, ratios are noise. Silence beats a confident guess."""
     r = audit_text("Short fragment of text.")
-    assert r.token_count < MIN_TOKENS_FOR_STATS
+    assert r.units < MIN_TOKENS_FOR_STATS
     assert not any(
-        f.mode in (Mode.SHATTERED_WORDS, Mode.NUMERIC_LOSS) for f in r.findings
+        f.mode in (Mode.SHATTERED_WORDS.value, Mode.NUMERIC_LOSS.value) for f in r.findings
     )
 
 
 def test_empty_text_does_not_crash():
     r = audit_text("")
-    assert r.token_count == 0
+    assert r.units == 0
     assert r.severity is Severity.CLEAN
 
 
@@ -187,15 +187,15 @@ def test_summary_takes_worst_page_not_average():
     """
     broken = "".join("\x01" if ch.isdigit() else ch for ch in CLEAN)
     pages = [CLEAN] * 49 + [broken]
-    s = summarise([audit_text(p) for p in pages])
+    s = summarise(audit_pages(pages))
     assert s["severity"] == Severity.CORRUPT.value
-    assert s["flagged_pages"] == [49]
-    assert s["pages"] == 50
+    assert s["flagged"] == ["page 49"]
+    assert s["artifacts"] == 50
 
 
 def test_summary_of_no_pages_is_safe():
     s = summarise([])
-    assert s["pages"] == 0
+    assert s["artifacts"] == 0
     assert s["severity"] == Severity.CLEAN.value
 
 
