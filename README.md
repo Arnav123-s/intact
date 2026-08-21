@@ -164,6 +164,64 @@ it is the one to fear.
 
 ---
 
+## Point it at anything
+
+A file, a folder, a pattern, or a URL — one call:
+
+```python
+from intact import scan
+
+print(scan("export.csv"))
+print(scan("data/"))                       # every data file, recursively
+print(scan("*.jsonl"))
+print(scan("https://example.org/data.csv"))
+print(scan(["a.csv", "reports/", "*.json"]))
+```
+
+**Formats:** CSV, TSV, JSON, JSON-Lines, xlsx, plain text.
+
+`.xlsx` is read with `zipfile` and `xml.etree` — an xlsx is a zip of XML, and both
+are standard library, so the zero-dependency promise survives Excel. It reads the
+**stored** values, not the displayed ones: a cell showing `42` may store
+`41.999999`, and the stored value is what your pipeline will actually consume.
+
+Parquet is the deliberate exception. There is no reasonable stdlib path, so it is
+detected, named, and skipped with a clear message rather than half-supported.
+
+### Format is decided by content, not extension
+
+Extensions lie constantly, so the extension is a hint and the content is the
+evidence:
+
+```
+plain.csv      -> csv
+quoted.csv     -> csv     (a column holding "1,234" no longer defeats the sniffer)
+tabs.csv       -> tsv     content is tab-delimited despite the name
+prose.txt      -> text    a comma in a sentence is not a delimiter
+book.xlsx      -> xlsx    read with the standard library
+README.md      -> skipped
+bad.json       -> reported, and the scan continues
+```
+
+### Findings that only exist across files
+
+Auditing thirty exports one at a time misses what is only visible between them:
+
+```
+Across files:
+  [SUSPECT] inconsistent_headers: 1 field(s) are named differently in different
+  files. A union or append across these will produce extra columns with
+  mostly-null values rather than an error
+    examples: 'CustomerID / customer_id'
+
+  [SUSPECT] odd_file_out: 2 of 3 files share a column layout; 1 do not.
+    examples: 'mar.csv'
+```
+
+In a folder scan, that is usually the finding.
+
+---
+
 ## It learns your data
 
 Shipped thresholds encode what corruption looked like on one corpus. Yours differs —
