@@ -398,6 +398,69 @@ check("review sheet renders", "Review sheet" in review_sheet(a))
 
 
 # =====================================================================
+print("\nDATABASE - read from SQL")
+# =====================================================================
+import sqlite3                                                    # noqa: E402
+from intact import database as db                                 # noqa: E402
+
+dbconn = sqlite3.connect(":memory:")
+dbconn.execute("CREATE TABLE customers (cid TEXT, name TEXT, revenue TEXT, "
+               "gene TEXT, status TEXT, joined TEXT)")
+_moji = "José".encode("utf-8").decode("latin-1")
+for i in range(300):
+    dbconn.execute("INSERT INTO customers VALUES (?,?,?,?,?,?)", (
+        str(1000 + i),
+        _moji if i % 3 == 0 else "Anne Muller",
+        f"{1000 + i:,}",
+        "2-Sep" if i % 4 == 0 else "TP53",
+        "N/A" if i % 5 == 0 else "active",
+        "2-Sep" if i == 77 else f"2026-{(i % 12) + 1:02d}-{(i % 28) + 1:02d}",
+    ))
+dbconn.execute("CREATE TABLE clean_ref (code TEXT, label TEXT)")
+for i in range(300):
+    dbconn.execute("INSERT INTO clean_ref VALUES (?,?)", (f"C{i:04d}", f"Label {i}"))
+dbconn.commit()
+
+ta = db.audit_table(dbconn, "customers")
+dbfound = {f.mode for r in ta.results for f in r.findings}
+check("db: mojibake found", "mojibake" in dbfound)
+check("db: excel dates found", "excel_date_corruption" in dbfound)
+check("db: null strings found", "null_as_string" in dbfound)
+check("db: formatted numbers found", "numeric_as_text" in dbfound)
+check("db: convention break found", "convention_break" in dbfound)
+
+cfound = {f.mode for r in db.audit_table(dbconn, "clean_ref").results
+          for f in r.findings}
+check("db: clean table stays clean", not cfound, str(cfound))
+check("db: discovers tables",
+      set(db.list_tables(dbconn)) == {"customers", "clean_ref"})
+check("db: audits whole database", len(db.audit_database(dbconn)) == 2)
+check("db: report renders", "tables" in db.report(db.audit_database(dbconn)))
+
+# Identifiers end up in SQL, so they are validated rather than escaped-and-hoped.
+_refused = 0
+for _bad in ('t; DROP TABLE users', 't" OR "1"="1', "t--", "t/*x*/"):
+    try:
+        db._quote_ident(_bad)
+    except ValueError:
+        _refused += 1
+check("db: refuses unsafe identifiers", _refused == 4, f"{_refused}/4")
+check("db: allows qualified names",
+      db._quote_ident("sales.orders") == '"sales"."orders"')
+
+_r = db.audit_query(dbconn, "SELECT * FROM customers WHERE status != ?",
+                    ("N/A",), name="filtered")
+check("db: parameterised queries work", _r.rows_read == 240, str(_r.rows_read))
+
+_r = db.audit_table(dbconn, "customers", limit=25)
+check("db: row limit respected", _r.rows_read == 25 and _r.truncated)
+
+dbconn.execute("CREATE TABLE empty_t (x TEXT)")
+check("db: empty table does not crash",
+      db.audit_table(dbconn, "empty_t").rows_read == 0)
+
+
+# =====================================================================
 print("\nCORE - reporting")
 # =====================================================================
 rows = clean_table()

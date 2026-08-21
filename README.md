@@ -180,6 +180,24 @@ print(scan(["a.csv", "reports/", "*.json"]))
 
 **Formats:** CSV, TSV, JSON, JSON-Lines, xlsx, plain text.
 
+**And databases** — corruption is usually already in the warehouse long before it
+reaches a file:
+
+```python
+import sqlite3            # or psycopg, pyodbc, snowflake, duckdb...
+from intact.database import audit_table, audit_database
+
+conn = sqlite3.connect("warehouse.db")
+print(audit_table(conn, "customers"))
+print(audit_database(conn))          # discovers the tables itself
+```
+
+Any driver implementing PEP 249 works, which is all of them, so this needs no new
+dependency. You make the connection; this borrows it — a data-quality library has no
+business holding database passwords. Table names are validated against an allowlist
+and quoted rather than interpolated, and there is a row limit by default because this
+is usually running against a database somebody else depends on.
+
 `.xlsx` is read with `zipfile` and `xml.etree` — an xlsx is a zip of XML, and both
 are standard library, so the zero-dependency promise survives Excel. It reads the
 **stored** values, not the displayed ones: a cell showing `42` may store
