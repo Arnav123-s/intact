@@ -2,27 +2,24 @@
 Scan — point it at anything, get one report.
 
 `sources.resolve` turns a path, folder, pattern or URL into parsed sources.
-`detectors/*` audit rows or text. This joins them, so the whole library reduces to
-one call for the common case:
+`detectors/*` audit rows or text. This joins the two, so the common case is one call:
 
     print(scan("data/"))
     print(scan("https://example.org/export.csv", profile=JOINS))
 
 What it adds beyond gluing
 ---------------------------
-**Routing.** Tabular sources get the tabular and consistency detectors; text sources
-get the text detector. Running a CSV through a prose-shattering check would produce
-confident nonsense, so nothing is run where it does not apply.
+**Routing.** Tabular sources get the tabular and consistency detectors. Text sources
+get the text detector. Running a CSV through a prose-shattering check produces
+confident nonsense, so nothing runs where it does not apply.
 
-**Cross-file findings.** Auditing thirty files one at a time misses the thing that
-only shows up across them: the same column that is `customer_id` in one export and
-`CustomerID` in another, or four files that agree on a date format and one that does
-not. Those are reported at the end, because in a folder scan they are usually the
-finding.
+**Cross-file findings.** Auditing thirty files one at a time misses what only shows
+up across them: a column that is `customer_id` in one export and `CustomerID` in
+another, or four files that agree on a date format and one that does not. Those get
+reported at the end, because in a folder scan they are usually the finding.
 
-**One verdict for the folder.** Worst wins, as everywhere else in this package. A
-directory is as trustworthy as its worst file, and averaging that away is the failure
-this library exists to prevent.
+**One verdict for the folder.** Worst wins, same as everywhere else here. A directory
+is only as trustworthy as its worst file.
 """
 
 from __future__ import annotations
@@ -32,7 +29,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable, Sequence
 
-from .core import AuditResult, Finding, Severity, summarise
+from .core import AuditResult, Finding, Severity, plural, summarise
 from .detectors import consistency, tabular, text as textdet
 from .profiles import Profile, RAW, apply_profile
 from .sources import Source, resolve
@@ -71,7 +68,7 @@ class ScanResult:
             if any(r.findings for r in results)
         )
         lines += [
-            f"scanned    : {len(self.sources)} source(s)",
+            f"scanned    : {plural(len(self.sources), 'source')}",
             f"flagged    : {n_flagged}",
             f"unreadable : {len(self.unreadable)}",
             f"verdict    : {self.severity.value}"
@@ -86,7 +83,7 @@ class ScanResult:
                 lines.append(f"  {s.name}: {why}")
             lines.append("")
 
-        # Worst sources first — a report in file order buries the one that matters.
+        # Worst sources first. A report in file order buries the one that matters.
         order = sorted(
             self.per_source.items(),
             key=lambda kv: -max(
@@ -120,8 +117,8 @@ def _audit_source(s: Source) -> list[AuditResult]:
     """Run whichever detectors apply to this kind of source."""
     if s.rows:
         results = tabular.audit_rows(s.rows)
-        # Consistency is additive: it finds convention breaks the fixed rules
-        # cannot see, and stays quiet where a column has no convention.
+        # Consistency is additive. It finds convention breaks the fixed rules cannot
+        # see, and stays quiet where a column has no convention.
         for c in consistency.audit_rows(s.rows):
             if c.findings:
                 results.append(c)
@@ -132,10 +129,9 @@ def _audit_source(s: Source) -> list[AuditResult]:
 
 
 def _cross_file(sources: Sequence[Source]) -> list[Finding]:
-    """Findings that only exist when several sources are compared.
+    """Findings that only exist when you compare several sources.
 
-    Two checks, both chosen because they are invisible file-by-file and expensive
-    to discover later:
+    Two checks. Both are invisible file-by-file and expensive to discover later:
 
       inconsistent headers  the same field named differently across exports, which
                             breaks a union or an append and does it silently
@@ -166,9 +162,9 @@ def _cross_file(sources: Sequence[Source]) -> list[Finding]:
             metric=float(len(inconsistent)),
             location="across files",
             detail=(
-                f"{len(inconsistent)} field(s) are named differently in different "
-                f"files. A union or append across these will produce extra columns "
-                f"with mostly-null values rather than an error"
+                f"{plural(len(inconsistent), 'field')} named differently across "
+                f"files. A union or append will produce extra columns full of nulls "
+                f"instead of an error"
             ),
             samples=tuple(examples),
         ))
@@ -191,8 +187,8 @@ def _cross_file(sources: Sequence[Source]) -> list[Finding]:
                 location="across files",
                 detail=(
                     f"{n_common} of {len(tabular_sources)} files share a column "
-                    f"layout; {len(odd)} do not. Check whether these are the same "
-                    f"kind of export before combining them"
+                    f"layout. {plural(len(odd), 'file')} did not. Check these are the "
+                    f"same kind of export before you combine them"
                 ),
                 samples=tuple(odd[:5]),
             ))
@@ -212,8 +208,8 @@ def scan(
         scan("https://example.org/data.csv")
         scan(["a.csv", "reports/", "*.jsonl"])
 
-    Pass a `profile` to score findings against what the data is for; without one,
-    everything is reported as measured.
+    Pass a `profile` to score findings against what the data is for. Without one,
+    everything gets reported as measured.
     """
     out = ScanResult(profile=profile)
 

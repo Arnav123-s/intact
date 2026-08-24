@@ -1,32 +1,33 @@
 """
 The pipeline — detection, logging and learning as one object.
 
-Keeping the feedback loop as a separate module people are supposed to remember to
-call is how it ends up never being called. Here it is wired in:
+Put the feedback loop in a separate module people have to remember to call and it
+never gets called. So it is wired in here:
 
     pipeline.audit(x)      runs detectors, applies current thresholds, logs features
-    pipeline.quarantine()  what needs a human look, worst first
+    pipeline.quarantine()  what needs a person to look at it, worst first
     pipeline.label(...)    your decision, which becomes training data
-                           thresholds refit automatically once there are enough
+                           thresholds refit on their own once there are enough
 
-There is no separate training step, and nothing degrades if you never label anything
-— the shipped defaults apply unchanged. The system starts useful and gets better at
-*your* data specifically, because your data is the only data it learns from.
+There is no separate training step, and nothing degrades if you never label anything.
+The shipped defaults just keep applying. It starts useful and gets better at *your*
+data, because your data is the only data it learns from.
 
 Why thresholds and not a model
 ------------------------------
-A one-dimensional threshold per feature, fitted by sweeping for best balanced
-accuracy, is close to the simplest thing that can learn. That is deliberate:
+One threshold per feature, fitted by sweeping for the best balanced accuracy, is
+close to the simplest thing that can learn. That is on purpose:
 
-  - It works on ~40 labels. A gradient-boosted model on 40 rows learns the noise.
-  - You can read the result. "flag when mojibake_rate >= 0.004" is auditable;
-    a tree ensemble's decision surface is not.
-  - It cannot fail silently. A threshold that drifts somewhere absurd is visible
-    the moment you print it.
+  - It works on about 40 labels. A gradient-boosted model on 40 rows learns the
+    noise.
+  - You can read the result. "flag when mojibake_rate >= 0.004" is auditable. A tree
+    ensemble's decision surface is not.
+  - It cannot fail silently. A threshold that drifts somewhere absurd is obvious the
+    moment you print it.
 
-For a data-quality gate — where a false negative silently poisons everything
-downstream — legibility beats accuracy. If it ever needs to be a real model, the
-feature log is already there, and nothing else has to change.
+For a data-quality gate, where a false negative quietly poisons everything
+downstream, being able to read it beats being slightly more accurate. If this ever
+needs to be a real model, the feature log is already there and nothing else changes.
 """
 
 from __future__ import annotations
@@ -42,21 +43,21 @@ from .core import AuditResult, Finding, Severity, report, summarise
 
 Label = Literal["keep", "discard"]
 
-# Below this many labels, or this many of either class, thresholds are not fitted.
+# Below this many labels, or this many of either class, thresholds do not get fitted.
 # A boundary drawn through nine examples is confident and wrong.
 MIN_LABELS_TO_FIT = 40
 MIN_PER_CLASS = 10
 
-# A learned threshold only displaces a default if it is meaningfully better, so
-# ordinary noise cannot churn the configuration run to run.
+# A learned threshold only displaces a default if it is clearly better, so ordinary
+# noise cannot churn the configuration from run to run.
 MIN_IMPROVEMENT = 0.03
 
 
 class Detector(Protocol):
     """Anything that can look at an artifact and report findings.
 
-    Deliberately minimal. A detector needs a name, the features it measures (so the
-    pipeline can log and learn them), and a way to turn an artifact into findings
+    Deliberately minimal. A detector needs a name, the features it measures so the
+    pipeline can log and learn them, and a way to turn an artifact into findings
     given the current thresholds.
     """
 
@@ -84,10 +85,10 @@ class Detector(Protocol):
 class AuditRecord:
     """One audit, with everything needed to re-derive its verdict later.
 
-    Features are logged, not verdicts. A verdict is a threshold applied to a feature;
-    log the feature and any past verdict can be recomputed, and every threshold
-    change can be replayed against the whole history. Log the verdict and that
-    information is gone for good.
+    Features get logged, not verdicts. A verdict is just a threshold applied to a
+    feature. Log the feature and you can recompute any past verdict and replay any
+    threshold change against the whole history. Log the verdict and that information
+    is gone for good.
     """
 
     record_id: str
@@ -103,9 +104,9 @@ class AuditRecord:
 class FeedbackLog:
     """Append-only feature log. The pipeline's memory.
 
-    Append-only is not fastidiousness. Thresholds are derived from this file, so if
-    rows can be edited in place, no threshold in the system is reproducible. A
-    changed mind is a new row; the latest row for a record_id wins.
+    Append-only is not fussiness. Thresholds come from this file, so if rows can be
+    edited in place then no threshold in the system is reproducible. A changed mind
+    is a new row, and the latest row for a record_id wins.
     """
 
     def __init__(self, path: str | Path):
@@ -146,8 +147,8 @@ def _balanced_accuracy(
 ) -> float:
     """Mean of sensitivity and specificity.
 
-    Balanced, not raw, because corpora are lopsided. If 95% of files are clean, a
-    detector that flags nothing scores 95% on raw accuracy and is worthless.
+    Balanced, not raw, because corpora are lopsided. If 95% of files are clean then a
+    detector that flags nothing scores 95% on raw accuracy and is worth nothing.
     """
     tp = fp = tn = fn = 0
     for v, lab in zip(values, labels):
@@ -179,14 +180,14 @@ class LearnedThreshold:
     def __str__(self) -> str:
         tag = "ADOPTED" if self.adopted else "kept default"
         return (
-            f"{self.feature}: {self.value:.5g} (default {self.default:.5g}) — "
+            f"{self.feature}: {self.value:.5g} (default {self.default:.5g}), "
             f"{self.accuracy:.1%} vs {self.default_accuracy:.1%} on "
-            f"{self.n_labels} labels — {tag}"
+            f"{self.n_labels} labels, {tag}"
         )
 
 
 class Pipeline:
-    """Detect, log, and learn — one object, one call site.
+    """Detect, log, and learn. One object, one call site.
 
     Example
     -------
@@ -221,8 +222,8 @@ class Pipeline:
     def thresholds_for(self, detector: Detector) -> dict[str, float]:
         """Current thresholds: learned where the evidence supports it, else default.
 
-        Cached against the label count so a long run does not refit on every call,
-        but a newly labelled batch takes effect without restarting anything.
+        Cached against the label count, so a long run does not refit on every call
+        but a newly labelled batch still takes effect without restarting anything.
         """
         if self.log is None:
             return detector.default_thresholds()
@@ -248,10 +249,10 @@ class Pipeline:
     def fit(self, detector: Detector) -> dict[str, LearnedThreshold] | None:
         """Refit one detector's thresholds from labelled history.
 
-        Returns None — explicitly, rather than quietly handing back defaults — when
-        there is not enough labelled data. The caller can then distinguish "learned,
-        and it agreed with the defaults" from "has not learned anything yet", which
-        are very different states to be in.
+        Returns None when there is not enough labelled data, rather than quietly
+        handing back the defaults. That way you can tell "it learned, and agreed with
+        the defaults" apart from "it has not learned anything yet". Those are very
+        different states to be in.
         """
         if self.log is None:
             return None
@@ -350,8 +351,8 @@ class Pipeline:
     def quarantine(self, limit: int = 50) -> list[AuditRecord]:
         """Unlabelled records that were flagged, worst first.
 
-        Ordered by severity because reviewer attention is the scarce resource — the
-        first ten things a human looks at should be the ten most likely to matter.
+        Ordered by severity because reviewer attention is the scarce resource. The
+        first ten things someone looks at should be the ten most likely to matter.
         """
         if self.log is None:
             return []
@@ -378,7 +379,7 @@ class Pipeline:
 
     def learning_report(self) -> str:
         if self.log is None:
-            return "No log configured — running on defaults, learning disabled."
+            return "No log configured. Running on defaults, learning disabled."
 
         rows = self.log.all()
         labelled = [r for r in rows if r.label is not None]
@@ -395,8 +396,8 @@ class Pipeline:
             if learned is None:
                 need = max(0, MIN_LABELS_TO_FIT - len(self.log.labelled(det.name)))
                 lines.append(
-                    f"{det.name}: using defaults — needs {need} more labels "
-                    f"(and >={MIN_PER_CLASS} of each class) before fitting"
+                    f"{det.name}: using defaults. Needs {need} more labels "
+                    f"(and at least {MIN_PER_CLASS} of each class) before it can fit"
                 )
             else:
                 adopted = sum(1 for t in learned.values() if t.adopted)

@@ -1,11 +1,11 @@
 """
 Run me:  python demo.py
 
-Builds a deliberately broken vendor export, shows you exactly how broken it is,
-then fixes it in front of you.
+Builds a deliberately broken vendor export, shows you how broken it is, then fixes
+it in front of you.
 
-Everything here is a real failure mode, not a contrivance. Each one has silently
-poisoned somebody's dataset.
+Everything here is a real failure mode, not something I made up. Each one has
+quietly poisoned somebody's dataset.
 """
 
 from __future__ import annotations
@@ -20,8 +20,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 # This demo prints accented characters. On Windows the console defaults to cp1252,
 # which cannot encode them, so printing raises UnicodeEncodeError before the demo
-# reaches its point. That is, with some irony, exactly the class of bug this library
-# exists to catch — so it is handled here rather than left to chance.
+# gets to its point. That is, with some irony, exactly the class of bug this library
+# exists to catch. So it is handled here rather than left to chance.
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 except (AttributeError, ValueError):  # pragma: no cover
@@ -76,12 +76,12 @@ def main() -> None:
     Path("vendor-export.csv").write_bytes(raw)
 
     rule("THE FILE YOU WERE SENT")
-    print("vendor-export.csv  —  200 rows, 6 columns\n")
+    print("vendor-export.csv  -  200 rows, 6 columns\n")
     print("Six things are wrong with it. None of them will raise an exception.\n")
     print("  1. encoding is cp1252, not utf-8")
     print("  2. delimiter is a semicolon, not a comma")
     print("  3. gene symbols were mangled into dates by Excel")
-    print("  4. revenue has thousands separators, so it is text not numbers")
+    print("  4. revenue has thousands separators, so it is text and not numbers")
     print("  5. status uses the strings 'NULL' and 'N/A' instead of real nulls")
     print("  6. one row has unescaped semicolons inside a field")
 
@@ -121,7 +121,7 @@ def main() -> None:
     if solution.quarantined:
         rule("WHAT COULD NOT BE SAVED", "-")
         print(f"{len(solution.quarantined)} rows were held back rather than guessed at.")
-        print("They are a dataset, not an error — same columns, plus a reason:\n")
+        print("They are a dataset, not an error. Same columns, plus a reason:\n")
         for row, why in list(zip(solution.quarantined,
                                  solution.quarantine_reasons))[:3]:
             shown = [c[:22] + "..." if len(c) > 22 else c for c in row[:4]]

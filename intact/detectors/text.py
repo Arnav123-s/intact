@@ -1,12 +1,12 @@
 """
 Text detector — silently corrupted text extraction, usually from PDFs.
 
-Most extraction stacks return a string and no indication of whether that string is
-trustworthy. Docling, for instance, exposes no confidence score for PDF results
-(github.com/docling-project/docling/discussions/2814). The failure is silent: you get
-text back, it looks like text, and some fraction of it is wrong.
+Most extraction stacks hand back a string and no way to tell whether it is
+trustworthy. Docling, for one, exposes no confidence score for PDF results
+(github.com/docling-project/docling/discussions/2814). The failure is silent. You get
+text back, it looks like text, and some of it is wrong.
 
-Three modes, all observed on a real corpus:
+Three modes, all of which I hit on a real corpus:
 
   MISSING_GLYPH    An embedded font lacks a character, or its ToUnicode CMap omits
                    it. "selection" extracts as "sele tion". The text looks almost
@@ -20,9 +20,9 @@ Three modes, all observed on a real corpus:
                    invisible if you only read the prose.
 
 Findings use the shared types in `core`, so a result from here can be compared and
-summarised alongside one from the tabular detector. This module previously defined
-its own Severity and Finding, which meant it could not — a bug that only surfaced
-once both detectors ran over the same folder.
+summarised next to one from the tabular detector. This module used to define its own
+Severity and Finding, which meant it could not. That bug only showed up once both
+detectors ran over the same folder.
 """
 
 from __future__ import annotations
@@ -54,10 +54,10 @@ class Mode(str, Enum):
 # They are exactly what `pipeline.Pipeline.fit` refits from your own labels.
 
 # Fraction of words caught in fragment runs before text is called shattered.
-# Clean prose measures ~0.00-0.02; light single-split damage ~0.05; genuine
-# character-positioning failure 0.25+. SUSPECT sits just above the clean band rather
-# than midway, because a missed corruption costs more than a second look at a clean
-# document.
+# Clean prose measures about 0.00-0.02. Light single-split damage is about 0.05.
+# Real character-positioning failure is 0.25 and up. SUSPECT sits just above the
+# clean band rather than midway, because missing a corruption costs more than taking
+# a second look at a clean document.
 SHATTERED_SUSPECT = 0.05
 SHATTERED_CORRUPT = 0.25
 
@@ -105,7 +105,7 @@ _SHORT = 4  # tokens this length or shorter are fragment candidates
 def _control_char_ratio(text: str) -> tuple[float, list[str]]:
     """Undecodable characters per 1000, with examples naming the codepoint.
 
-    Tab, newline and carriage return are excluded — they are legitimate in extracted
+    Tab, newline and carriage return are excluded. They are legitimate in extracted
     text and would otherwise dominate the count.
     """
     if not text:
@@ -138,14 +138,14 @@ def _control_char_ratio(text: str) -> tuple[float, list[str]]:
 def _fragment_ratio(text: str) -> tuple[float, list[str]]:
     """Fraction of words sitting inside runs of consecutive short non-stopwords.
 
-    Counting short words alone does not work: shattering produces mostly 3-4
-    character pieces, which collide with real English words (the, for, with). Length
-    cannot separate them.
+    Counting short words alone does not work. Shattering produces mostly 3-4
+    character pieces, which collide with real English words like the, for and with.
+    Length cannot separate them.
 
     Runs can. English alternates short function words with longer content words, so
-    three short non-stopwords in a row is rare in real prose and pervasive in
+    three short non-stopwords in a row is rare in real prose and everywhere in
     shattered text. Evidence is reported as whole runs, because the run is the
-    evidence — an isolated short word proves nothing.
+    evidence. An isolated short word proves nothing.
     """
     words = _WORD.findall(text)
     if len(words) < MIN_TOKENS_FOR_STATS:
@@ -184,7 +184,7 @@ def _digit_token_ratio(text: str) -> tuple[float, int]:
     """Fraction of whitespace tokens containing at least one digit.
 
     Returns -1.0 when the text is too short to judge, so the caller can tell "no
-    digits" from "not enough text to say".
+    digits" apart from "not enough text to say".
     """
     tokens = _TOKEN.findall(text)
     if len(tokens) < MIN_TOKENS_FOR_STATS:
@@ -196,11 +196,11 @@ def _digit_token_ratio(text: str) -> tuple[float, int]:
 
 
 def audit_text(text: str, subject: str = "") -> AuditResult:
-    """Score one extracted document and name any corruption present.
+    """Score one extracted document and name any corruption in it.
 
-    Nothing is discarded here — the decision to quarantine belongs to the pipeline,
+    Nothing is discarded here. The decision to quarantine belongs to the pipeline,
     not the detector. Every finding carries its measurement, its threshold and real
-    examples so the caller can disagree with a threshold without losing the number.
+    examples, so you can disagree with a threshold without losing the number.
     """
     findings: list[Finding] = []
     tokens = len(_TOKEN.findall(text))
@@ -216,11 +216,11 @@ def audit_text(text: str, subject: str = "") -> AuditResult:
             metric=glyph_rate,
             threshold=GLYPH_CORRUPT if corrupt else GLYPH_SUSPECT,
             detail=(
-                f"{glyph_rate:.2f} undecodable characters per 1000 — the font's "
+                f"{glyph_rate:.2f} undecodable characters per 1000. The font's "
                 f"character map is incomplete and the text is unreliable throughout"
                 if corrupt else
-                f"{glyph_rate:.2f} undecodable characters per 1000 — localised "
-                f"glyph loss"
+                f"{glyph_rate:.2f} undecodable characters per 1000, so glyph loss is "
+                f"localised"
             ),
             samples=tuple(glyph_samples),
             location=subject,
@@ -236,10 +236,10 @@ def audit_text(text: str, subject: str = "") -> AuditResult:
             metric=frag_rate,
             threshold=SHATTERED_CORRUPT if corrupt else SHATTERED_SUSPECT,
             detail=(
-                f"{frag_rate:.1%} of words are fragments — spacing was reconstructed "
+                f"{frag_rate:.1%} of words are fragments. Spacing was reconstructed "
                 f"from character positions and failed"
                 if corrupt else
-                f"{frag_rate:.1%} of words are fragments — word boundaries are "
+                f"{frag_rate:.1%} of words are fragments, so word boundaries are "
                 f"unreliable"
             ),
             samples=tuple(frag_samples),
@@ -256,12 +256,12 @@ def audit_text(text: str, subject: str = "") -> AuditResult:
             metric=digit_rate,
             threshold=NUMERIC_CORRUPT if corrupt else NUMERIC_SUSPECT,
             detail=(
-                f"only {digit_rate:.3%} of tokens contain a digit — digits are "
+                f"only {digit_rate:.3%} of tokens contain a digit. Digits are "
                 f"stored as unmapped bytes. NO NUMBER FROM THIS DOCUMENT CAN BE "
                 f"VERIFIED"
                 if corrupt else
-                f"only {digit_rate:.3%} of tokens contain a digit — unusually few "
-                f"for academic text; check figures before relying on them"
+                f"only {digit_rate:.3%} of tokens contain a digit, which is unusually "
+                f"few for academic text. Check figures before relying on them"
             ),
             location=subject,
         ))
@@ -274,8 +274,8 @@ def audit_text(text: str, subject: str = "") -> AuditResult:
 def audit_pages(pages: Sequence[str]) -> list[AuditResult]:
     """Audit each page separately.
 
-    Corruption is frequently confined to particular pages — a figure-heavy section
-    with a different embedded font, or scanned pages inside a digital document.
-    Auditing the whole text at once averages that away and hides it.
+    Corruption often sits on particular pages: a figure-heavy section with a
+    different embedded font, or scanned pages inside a digital document. Auditing the
+    whole text at once averages that away and hides it.
     """
     return [audit_text(p, subject=f"page {i}") for i, p in enumerate(pages)]

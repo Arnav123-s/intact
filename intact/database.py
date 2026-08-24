@@ -2,39 +2,39 @@
 Database — audit what is already in a table, not just what arrives in a file.
 
 Corruption does not start when data reaches a CSV. It is usually already in the
-warehouse: an import ran with the wrong encoding two years ago, a column was widened
-after it had already been truncating, a spreadsheet round-trip turned identifiers
+warehouse. An import ran with the wrong encoding two years ago. A column got widened
+after it had already been truncating. A spreadsheet round-trip turned identifiers
 into dates before anyone loaded it. By the time it exports, the damage is old.
 
 This reads from any database Python can already talk to, with no new dependencies.
 
 Zero dependencies, because DB-API is a standard
 ------------------------------------------------
-Every Python database driver — sqlite3, psycopg, mysqlclient, pyodbc, snowflake,
-duckdb — implements PEP 249. That means a connection object always has `.cursor()`,
-a cursor always has `.execute()`, `.fetchmany()` and `.description`. So this takes a
+Every Python database driver implements PEP 249: sqlite3, psycopg, mysqlclient,
+pyodbc, snowflake, duckdb. That means a connection always has `.cursor()`, and a
+cursor always has `.execute()`, `.fetchmany()` and `.description`. So this takes a
 connection you already made and never needs to know which database it is:
 
     import psycopg
     conn = psycopg.connect(...)
     print(audit_table(conn, "public.customers"))
 
-`sqlite3` is standard library, so the sqlite path works out of the box and is what
-the tests exercise.
+`sqlite3` is standard library, so the sqlite path works out of the box, and that is
+the path the tests exercise.
 
-Everything is read as text, deliberately
------------------------------------------
-Values are converted to strings before the detectors see them. That sounds lossy and
-is the point: the detectors look for damage that survives *as text* — a name that was
-mangled on import, an identifier that became a date, a number carrying a thousands
-separator. A driver handing back a clean Python `int` has already hidden whether the
-column is text or numeric, which is exactly the question. Reading as text keeps the
-evidence visible.
+Everything is read as text, on purpose
+---------------------------------------
+Values become strings before the detectors see them. That sounds lossy and it is the
+point. The detectors look for damage that survives *as text*: a name mangled on
+import, an identifier that became a date, a number carrying a thousands separator. A
+driver handing back a clean Python `int` has already hidden whether the column is
+text or numeric, and that is exactly the question. Reading as text keeps the evidence
+visible.
 
 What this deliberately does not do
 -----------------------------------
 No connection strings, no credential handling, no driver installation. You make the
-connection; this borrows it. Anything else would mean this module holds database
+connection, this borrows it. Anything else would mean this module holds database
 passwords, and a data-quality library has no business doing that.
 """
 
@@ -47,13 +47,13 @@ from typing import Any, Iterable, Iterator, Protocol, Sequence
 from .core import AuditResult, Finding, Severity, summarise
 from .detectors import consistency, tabular
 
-# Rows pulled per round trip. Large enough that the network cost amortises, small
+# Rows pulled per round trip. Big enough that the network cost amortises, small
 # enough that a wide table does not arrive all at once.
 FETCH_SIZE = 10_000
 
 # Default cap on rows examined per table. Corruption is a property of a column, and a
-# hundred thousand rows establishes a rate as well as ten million do — at a fraction
-# of the load on a database someone else is using.
+# hundred thousand rows pins down a rate just as well as ten million, at a fraction of
+# the load on a database someone else is using.
 DEFAULT_LIMIT = 100_000
 
 # Identifiers are quoted, never interpolated blind. This is the allowlist for what a
@@ -103,13 +103,13 @@ class TableAudit:
 def _quote_ident(name: str) -> str:
     """Quote a possibly-qualified identifier, rejecting anything unusual.
 
-    Table names arrive from callers and end up in SQL, so they are validated against
-    an allowlist and quoted per-part rather than interpolated. A name that does not
-    match is refused rather than escaped-and-hoped.
+    Table names come from callers and end up in SQL, so they get checked against an
+    allowlist and quoted part by part rather than interpolated. A name that does not
+    match is refused, not escaped and hoped for.
 
     Double quotes are the SQL standard and work on Postgres, SQLite, DuckDB, Oracle
-    and Snowflake. MySQL in its default mode wants backticks — pass a pre-quoted
-    name, or set ANSI_QUOTES.
+    and Snowflake. MySQL in its default mode wants backticks, so pass a pre-quoted
+    name or set ANSI_QUOTES.
     """
     parts = name.split(".")
     for p in parts:
@@ -132,7 +132,7 @@ def read_rows(
 
     Fetched in batches rather than all at once, so a large result does not have to
     fit in memory twice. Values become strings because that is what the detectors
-    need to see — see the module docstring.
+    need to see. The module docstring explains why.
     """
     cur = conn.cursor()
     cur.execute(query, params or ())
@@ -167,8 +167,8 @@ def audit_query(
 ) -> TableAudit:
     """Audit the result of any SQL you write.
 
-    Use this for joins, filters, or a single suspect column. Anything the database
-    can return, this can check.
+    Use it for joins, filters, or one suspect column. Anything the database can
+    return, this can check.
     """
     header, rows = read_rows(conn, query, params, limit)
     if not header:
@@ -200,8 +200,8 @@ def audit_table(
         audit_table(conn, "customers")
         audit_table(conn, "sales.orders", limit=50_000)
 
-    `where` is appended verbatim, so it must not contain untrusted input. When in
-    doubt use `audit_query`, which makes the SQL yours and the responsibility with it.
+    `where` gets appended verbatim, so it must not contain untrusted input. When in
+    doubt use `audit_query`, which makes the SQL yours and the responsibility too.
     """
     ident = _quote_ident(table)
     sql = f"SELECT * FROM {ident}"
@@ -215,10 +215,10 @@ def audit_table(
 def list_tables(conn: Connection) -> list[str]:
     """Best-effort table listing across the common databases.
 
-    There is no standard way to do this — every database exposes its catalogue
-    differently — so this tries the portable options in turn and returns an empty
-    list rather than raising if none work. A caller who knows their database can
-    always pass table names directly.
+    There is no standard way to do this, because every database exposes its catalogue
+    differently. So this tries the portable options in turn and returns an empty list
+    rather than raising if none of them work. If you know your database, pass table
+    names directly instead.
     """
     attempts = (
         # ANSI information_schema: Postgres, MySQL, SQL Server, Snowflake, DuckDB
@@ -249,9 +249,9 @@ def audit_database(
 ) -> list[TableAudit]:
     """Audit every table, or a named subset.
 
-    Tables are read one at a time rather than concurrently. This is usually running
-    against a database somebody else depends on, and being slow is preferable to
-    being the reason their queries got slow.
+    Tables get read one at a time, not concurrently. This is usually running against
+    a database somebody else depends on, and being slow beats being the reason their
+    queries got slow.
     """
     names = list(tables) if tables is not None else list_tables(conn)
     return [audit_table(conn, t, limit=limit) for t in names]

@@ -2,35 +2,35 @@
 Sources — point it at anything and it works out the rest.
 
 Everything else in this package takes rows or text. Getting rows or text out of "a
-thing a person has" is a surprisingly large amount of tedium: is it a file, a folder,
-a URL, a pattern, a zip? Is it CSV or TSV or JSON-lines or an Excel export someone
-renamed to .csv? Which of those thirty files in the folder are data and which are
-readmes?
+thing someone has" turns out to be a lot of tedium. Is it a file, a folder, a URL, a
+pattern, a zip? Is it CSV or TSV or JSON-lines or an Excel export someone renamed to
+.csv? Which of those thirty files in the folder are data and which are readmes?
 
-This module answers all of that, so a caller can write:
+This module answers all of that, so you can write:
 
     for source in resolve("data/"):        # a folder
     for source in resolve("*.csv"):        # a pattern
     for source in resolve("https://...")   # a URL
     for source in resolve(["a.csv", "b/"]) # several of the above
 
-and get back a uniform stream of named, typed, already-parsed sources.
+and get back one uniform stream of named, typed, already-parsed sources.
 
 Format detection: content over extension
 -----------------------------------------
 Extensions lie constantly. Excel exports get renamed to `.csv`, JSON-lines files get
-called `.json`, `.txt` holds anything at all. So the extension is a hint and the
-content is the evidence — the sniffer reads the first few kilobytes and decides from
-what is actually there, and disagreements are reported rather than silently resolved.
+called `.json`, and `.txt` holds anything at all. So the extension is a hint and the
+content is the evidence. The sniffer reads the first few kilobytes and decides from
+what is actually there. When the two disagree it says so instead of quietly picking.
 
 Zero dependencies, including Excel
 -----------------------------------
-`.xlsx` is a zip archive of XML. `zipfile` and `xml.etree` are both standard library,
-so xlsx is read here without pandas or openpyxl. That is more code than importing a
-library, and it keeps the promise that this installs anywhere with nothing else.
+An `.xlsx` is a zip archive of XML. `zipfile` and `xml.etree` are both standard
+library, so xlsx gets read here without pandas or openpyxl. That is more code than
+importing a library, and it keeps the promise that this installs anywhere with
+nothing else.
 
-Parquet is the deliberate exception: there is no reasonable stdlib path, so it is
-detected, named, and skipped with a clear message rather than half-supported.
+Parquet is the deliberate exception. There is no reasonable stdlib path, so it gets
+detected, named and skipped with a clear message instead of half-supported.
 """
 
 from __future__ import annotations
@@ -44,15 +44,17 @@ import urllib.request
 import zipfile
 from collections import Counter
 from dataclasses import dataclass, field
+
+from .core import plural
 from pathlib import Path
 from typing import Any, Iterator, Sequence
 from xml.etree import ElementTree
 
-# Read this much to decide what a thing is. Enough to be sure, small enough to be free
-# even when the source is a 40 GB file or a slow URL.
+# Read this much to decide what a thing is. Enough to be sure, small enough to be
+# free even when the source is a 40 GB file or a slow URL.
 SNIFF_BYTES = 64 * 1024
 
-# Files that are never data, however they are named. Saves a folder scan from
+# Files that are never data, whatever they are called. Stops a folder scan from
 # reporting that your README is not valid CSV.
 _SKIP_NAMES = {
     "readme", "license", "licence", "changelog", "contributing", "authors",
@@ -77,9 +79,9 @@ class SourceError(Exception):
 class Source:
     """One resolved, parsed thing, ready for a detector.
 
-    `rows` is set for tabular formats, `text` for document formats. Exactly one of
-    them is populated, so a caller can branch on which is None without inspecting
-    `kind` — though `kind` is there when the distinction matters.
+    `rows` is set for tabular formats and `text` for document formats. Exactly one of
+    them is populated, so you can branch on which is None without looking at `kind`.
+    `kind` is there for when the distinction matters.
     """
 
     name: str
@@ -109,9 +111,9 @@ class Source:
 def _fetch_url(url: str, timeout: int = 60) -> bytes:
     """Read a URL. No retries, no auth, no redirects beyond urllib's default.
 
-    Deliberately thin. Anything needing headers, tokens or pagination should fetch
-    the bytes itself and hand them to `from_bytes` — this is a convenience, not an
-    HTTP client, and pretending otherwise invites a pile of half-features.
+    Deliberately thin. If you need headers, tokens or pagination, fetch the bytes
+    yourself and hand them to `from_bytes`. This is a convenience, not an HTTP
+    client, and pretending otherwise invites a pile of half-features.
     """
     req = urllib.request.Request(url, headers={"User-Agent": "intact/0.1"})
     try:
@@ -140,9 +142,9 @@ def _looks_like_data(path: Path) -> bool:
 def sniff_kind(head: bytes, hint: str = "") -> tuple[str, list[str]]:
     """Decide a format from content, using the extension only as a tiebreak.
 
-    Returns the kind and any notes worth surfacing — in particular when the content
-    disagrees with the extension, which is common enough to be worth saying out loud
-    rather than quietly overriding.
+    Returns the kind plus any notes worth surfacing, especially when the content
+    disagrees with the extension. That happens often enough to be worth saying out
+    loud instead of quietly overriding.
     """
     notes: list[str] = []
     ext = hint.lower().lstrip(".")
@@ -183,16 +185,16 @@ def sniff_kind(head: bytes, hint: str = "") -> tuple[str, list[str]]:
     # Delimited text: pick whichever candidate makes the rows rectangular.
     #
     # Counting delimiter characters per line does NOT work, and this module had that
-    # bug: a column holding "1,234" contains a quoted comma, so raw comma counts vary
-    # line to line, the sniffer concludes there is no delimiter, and the file falls
+    # bug. A column holding "1,234" contains a quoted comma, so raw comma counts vary
+    # line to line, the sniffer decides there is no delimiter, and the file falls
     # through to "text" and never reaches the tabular detectors.
     #
-    # So each candidate is parsed with a real CSV reader, which honours quoting, and
-    # scored by how many rows come out at the modal width. The right delimiter is the
-    # one that makes the table rectangular.
+    # So each candidate gets parsed with a real CSV reader, which honours quoting,
+    # and scored by how many rows come out at the modal width. The right delimiter is
+    # the one that makes the table rectangular.
     lines_ = [l for l in sample.splitlines() if l.strip()][:50]
     if len(lines_) >= 2:
-        # Drop a trailing partial line - the sniff buffer usually cuts mid-row.
+        # Drop a trailing partial line. The sniff buffer usually cuts mid-row.
         keep = lines_[:-1] if len(lines_) > 2 else lines_
         body = "\n".join(keep)
         best, best_score = "", 0.0
@@ -205,15 +207,15 @@ def sniff_kind(head: bytes, hint: str = "") -> tuple[str, list[str]]:
                 continue
             # Need enough rows for "rectangular" to mean anything. Two lines of
             # prose where one happens to contain a comma would otherwise score as a
-            # two-column table, which is how this first misclassified plain text.
+            # two-column table. That is how this first misclassified plain text.
             if len(parsed) < 3:
                 continue
             widths = Counter(len(r) for r in parsed)
             modal, n = widths.most_common(1)[0]
             if modal < 2:
                 continue
-            # And the modal width must actually dominate. Prose produces a scatter of
-            # widths; a table produces one width for nearly every row.
+            # And the modal width has to dominate. Prose produces a scatter of
+            # widths. A table produces one width for nearly every row.
             agreement = n / len(parsed)
             if agreement < 0.8:
                 continue
@@ -253,9 +255,9 @@ def _read_delimited(raw: bytes, delimiter: str, name: str) -> Source:
 def _read_json(raw: bytes, name: str, lines: bool) -> Source:
     """Flatten JSON records to rows so the tabular detectors can see them.
 
-    Only the top level is flattened. Nested objects are serialised back to JSON in
-    their cell rather than exploded into columns, because exploding changes the shape
-    of the data and this module's job is to read it, not reinterpret it.
+    Only the top level gets flattened. Nested objects are serialised back to JSON in
+    their own cell rather than exploded into columns. Exploding changes the shape of
+    the data, and this module's job is to read it, not reinterpret it.
     """
     text = raw.decode("utf-8", errors="replace")
     records: list[dict[str, Any]] = []
@@ -325,13 +327,13 @@ _NS = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
 def _read_xlsx(raw: bytes, name: str) -> list[Source]:
     """Read xlsx with the standard library only.
 
-    An xlsx is a zip containing one XML per sheet plus a shared string table. Cell
+    An xlsx is a zip holding one XML per sheet plus a shared string table. Cell
     values are either inline or an index into that table. This walks both.
 
-    Worth knowing: this reads the STORED values, not what Excel displays. A cell
-    showing 42 might store 41.999999. That is a feature here — the stored value is
-    what a pipeline will actually consume, and the displayed one is a formatting
-    illusion that has misled a great many people.
+    Worth knowing: it reads the STORED values, not what Excel displays. A cell showing
+    42 might store 41.999999. That is deliberate. The stored value is what your
+    pipeline will actually consume. The displayed one is a formatting illusion, and it
+    has caught out a lot of people.
     """
     out: list[Source] = []
     try:
@@ -429,13 +431,13 @@ def resolve(
 ) -> Iterator[Source]:
     """Turn anything into a stream of parsed sources.
 
-    Accepts a file path, a directory, a glob pattern, an http(s) URL, or any mix of
+    Takes a file path, a directory, a glob pattern, an http(s) URL, or any mix of
     those in a list.
 
-    `on_error` controls unreadable sources: "report" yields a Source carrying the
-    error in `notes` so a batch run does not stop on one bad file, "raise" propagates,
-    "skip" drops it silently. Reporting is the default because in a folder of two
-    hundred files, the one that failed is usually the interesting one.
+    `on_error` controls what happens to unreadable sources. "report" yields a Source
+    with the error in `notes`, so a batch run does not stop on one bad file. "raise"
+    propagates. "skip" drops it silently. Reporting is the default because in a folder
+    of two hundred files, the one that failed is usually the interesting one.
     """
     targets = (
         [target] if isinstance(target, (str, Path))
@@ -509,9 +511,9 @@ def _one_path(path: Path, on_error: str) -> Iterator[Source]:
 def inventory(target: str | Path | Sequence[str | Path]) -> str:
     """List what is there and how it was read, without auditing anything.
 
-    Run this first when pointed at an unfamiliar folder. Knowing that eleven of your
-    forty files are actually tab-delimited despite their .csv extension is usually
-    the finding, and it costs one pass.
+    Run this first on an unfamiliar folder. Finding out that eleven of your forty
+    files are actually tab-delimited despite the .csv extension is usually the whole
+    story, and it costs one pass.
     """
     lines: list[str] = []
     counts: dict[str, int] = {}
@@ -524,7 +526,7 @@ def inventory(target: str | Path | Sequence[str | Path]) -> str:
         lines.append(f"  {s}")
 
     head = [
-        f"{sum(counts.values())} source(s): "
+        f"{plural(sum(counts.values()), 'source')}: "
         + ", ".join(f"{v} {k}" for k, v in sorted(counts.items())),
     ]
     if problems:

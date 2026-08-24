@@ -2,8 +2,8 @@
 Tabular detector — silent corruption in CSV, TSV and spreadsheet exports.
 
 Tabular data fails quietly and often. The file opens, the row count looks right, the
-dataframe has the expected columns, and some fraction of the values are wrong. Nothing
-raises. These are the failures worth catching, all of them observed in the wild:
+dataframe has the columns you expected, and some of the values are wrong. Nothing
+raises. These are the failures worth catching. I have seen all of them in real data:
 
   MOJIBAKE            UTF-8 bytes decoded as Latin-1 or CP1252. "café" becomes
                       "cafÃ©", "don't" becomes "don't". Sorts fine, joins fine,
@@ -13,9 +13,9 @@ raises. These are the failures worth catching, all of them observed in the wild:
                       return nonsense, or the column is dropped from a numeric
                       summary and nobody notices the gap.
 
-  RAGGED_ROWS         Rows whose field count differs from the header — an unescaped
-                      delimiter inside a quoted value. Every column after the break
-                      is shifted, so values land under the wrong names.
+  RAGGED_ROWS         Rows whose field count differs from the header. Usually an
+                      unescaped delimiter inside a quoted value. Every column after
+                      the break is shifted, so values land under the wrong names.
 
   TRUNCATION          Values clustered at exactly 255, 100 or 50 characters: the
                       signature of a VARCHAR limit upstream. The data is cut and
@@ -25,9 +25,9 @@ raises. These are the failures worth catching, all of them observed in the wild:
                       passes a not-null check, poisons every average.
 
   EXCEL_DATE          The famous one. Excel converts gene symbols and identifiers to
-                      dates: SEPT2 -> 2-Sep, MARCH1 -> 1-Mar. It was severe enough
-                      that the HGNC renamed the affected genes rather than keep
-                      fighting the spreadsheet.
+                      dates: SEPT2 -> 2-Sep, MARCH1 -> 1-Mar. It got bad enough that
+                      the HGNC renamed the affected genes rather than keep fighting
+                      the spreadsheet.
 
   LEADING_ZERO_LOSS   Zip codes, account numbers and part IDs read as integers.
                       "01234" becomes 1234 and the join fails, or worse, matches
@@ -35,12 +35,12 @@ raises. These are the failures worth catching, all of them observed in the wild:
 
 Design
 ------
-Column-wise, not file-wise. Corruption is almost always confined to particular
-columns, and a whole-file score averages it into invisibility — which is the exact
-failure this library exists to prevent.
+Column-wise, not file-wise. Corruption almost always sits in particular columns, and
+a whole-file score averages it into invisibility.
 
-No pandas dependency. Takes rows of strings, so it works on a csv.reader, a database
-cursor, a list of lists, or a dataframe converted with .astype(str).values.tolist().
+No pandas dependency. It takes rows of strings, so it works on a csv.reader, a
+database cursor, a list of lists, or a dataframe you converted with
+.astype(str).values.tolist().
 """
 
 from __future__ import annotations
@@ -49,7 +49,7 @@ import re
 from collections import Counter
 from typing import Any, Literal, Sequence
 
-from ..core import AuditResult, Finding, Severity
+from ..core import AuditResult, Finding, Severity, plural
 
 # --- thresholds, deliberately visible and refittable by the pipeline -------------
 
@@ -114,11 +114,11 @@ _FORMATTED_NUMBER = re.compile(
 
 
 def _is_formatted_number(value: str) -> bool:
-    """True for a number that has been formatted for display rather than storage.
+    """True for a number formatted for display rather than storage.
 
-    This is the distinction that makes the check useful: a CSV holding `1234` is
-    just an untyped file, but a CSV holding `1,234` has had a display format baked
-    into the data, and every cast downstream will fail on it.
+    This distinction is what makes the check useful. A CSV holding `1234` is just an
+    untyped file. A CSV holding `1,234` has a display format baked into the data, and
+    every cast downstream will fail on it.
     """
     return bool(_FORMATTED_NUMBER.match(value))
 
@@ -157,21 +157,21 @@ def audit_column(
                 metric=rate, threshold=t["mojibake_rate"],
                 detail=(
                     f"{affected} of {n} values contain UTF-8-read-as-Latin-1 "
-                    f"sequences — this column was decoded with the wrong encoding"
+                    f"sequences. This column was decoded with the wrong encoding"
                 ),
                 samples=tuple(s for s, _ in hits.most_common(5)),
             ))
 
     # --- numbers carrying display formatting
     #
-    # NOT "numbers stored as text". In a CSV every value is text — there are no
-    # types — so flagging every numeric column would fire on every ID and every
-    # amount in every file ever written, which is noise, not a finding.
+    # NOT "numbers stored as text". In a CSV every value is text, because a CSV has
+    # no types. Flagging every numeric column would fire on every ID and every amount
+    # in every file ever written. That is noise, not a finding.
     #
-    # What is actually worth reporting is a number carrying DISPLAY FORMATTING:
-    # thousands separators, a currency symbol, a trailing percent. Those mean the
-    # value was formatted for a human, and any downstream cast will fail or silently
-    # produce nulls. A bare "1234" needs no warning; "1,234" does.
+    # What is worth reporting is a number carrying DISPLAY FORMATTING: thousands
+    # separators, a currency symbol, a trailing percent. Those mean the value was
+    # formatted for a person to read, and any downstream cast will fail or quietly
+    # produce nulls. A bare "1234" needs no warning. "1,234" does.
     if judged and non_empty:
         formatted = [v for v in non_empty if _is_formatted_number(v)]
         numeric = sum(1 for v in non_empty if _is_numeric(v))
@@ -184,7 +184,7 @@ def audit_column(
                 threshold=t["numeric_as_text"],
                 detail=(
                     f"{ratio:.0%} of values are numbers carrying display formatting "
-                    f"(e.g. {example!r}) — a cast to a numeric type will fail or "
+                    f"(e.g. {example!r}). A cast to a numeric type will fail or "
                     f"silently produce nulls, and aggregations will be wrong"
                 ),
                 samples=tuple(formatted[:5]),
@@ -197,10 +197,10 @@ def audit_column(
     # --- truncation at a VARCHAR limit
     #
     # Diversity matters as much as the count. Real truncation cuts MANY DIFFERENT
-    # values to the same length. A single value repeated thousands of times at
-    # exactly 50 characters is a long name, not damage.
+    # values to the same length. One value repeated thousands of times at exactly 50
+    # characters is a long name, not damage.
     #
-    # Two checks, and real data showed both are needed:
+    # Two checks, and real data showed I needed both:
     #
     #   max length   If any value is longer than the candidate limit, nothing is
     #                being cut at that limit.
@@ -234,9 +234,9 @@ def audit_column(
                     location=f"column {name!r}", metric=rate,
                     threshold=t["truncation"],
                     detail=(
-                        f"{at_limit} values are exactly {limit} characters — the "
-                        f"signature of a VARCHAR({limit}) limit upstream. These "
-                        f"values are cut off"
+                        f"{at_limit} values are exactly {limit} characters. That is "
+                        f"the signature of a VARCHAR({limit}) limit upstream, and "
+                        f"these values are cut off"
                     ),
                     samples=tuple(
                         v[:40] + "..." for v in non_empty if len(v) == limit
@@ -254,7 +254,7 @@ def audit_column(
                 threshold=t["null_string"],
                 detail=(
                     f"{len(nullish)} values are null-like strings rather than real "
-                    f"nulls — they pass not-null checks and corrupt aggregates"
+                    f"nulls. They pass not-null checks and corrupt aggregates"
                 ),
                 samples=tuple(s for s, _ in Counter(nullish).most_common(5)),
             ))
@@ -289,9 +289,9 @@ def audit_column(
                         threshold=t["leading_zero"],
                         detail=(
                             f"identifier column with varying digit lengths "
-                            f"({sorted(lengths)[:5]}) and no zero padding — leading "
+                            f"({sorted(lengths)[:5]}) and no zero padding. Leading "
                             f"zeros were probably stripped by a numeric read. Joins "
-                            f"on this column may silently fail or mismatch"
+                            f"on this column may silently fail or match the wrong row"
                         ),
                         samples=tuple(numeric_vals[:5]),
                     ))
@@ -308,9 +308,9 @@ def audit_rows(
 ) -> list[AuditResult]:
     """Audit a whole table: structural checks, then every column.
 
-    Pass `header` explicitly, or the first row is used. Ragged rows are reported as a
-    table-level finding because they are not attributable to any single column — that
-    is precisely the damage, values shift out from under their names.
+    Pass `header` explicitly, or the first row gets used. Ragged rows are reported at
+    table level because you cannot pin them on any single column. That is the damage:
+    values shift out from under their names.
     """
     t = {**_defaults(), **(thresholds or {})}
     rows = [list(r) for r in rows]
@@ -340,7 +340,7 @@ def audit_rows(
                     threshold=t["ragged"], location="table",
                     detail=(
                         f"{len(ragged)} of {len(rows)} rows have a field count "
-                        f"different from the {width}-column header — almost always an "
+                        f"different from the {width}-column header. Almost always an "
                         f"unescaped delimiter inside a quoted value. Every column "
                         f"after the break is shifted"
                     ),
@@ -358,8 +358,9 @@ def audit_rows(
             findings=[Finding(
                 mode="duplicate_columns", severity=Severity.SUSPECT,
                 location="header", detail=(
-                    f"{len(dupes)} column name(s) appear more than once — most "
-                    f"loaders keep only the last, dropping the others without warning"
+                    f"{plural(len(dupes), 'column name')} used more than once. "
+                    f"Most loaders keep only the last one and drop the rest without "
+                    f"warning"
                 ),
                 samples=tuple(dupes[:5]),
             )],

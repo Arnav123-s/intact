@@ -1,34 +1,34 @@
 """
 Profiles — severity depends on what the data is for.
 
-A truncated `notes` column is irrelevant if you are building a search index and fatal
-if you are keeping a compliance archive. Lost leading zeros are cosmetic in a report
-and catastrophic the moment you join on that column. Mojibake in a name field breaks
-entity resolution and does not touch a topic model.
+A truncated `notes` column does not matter if you are building a search index, and is
+fatal if you are keeping a compliance archive. Lost leading zeros are cosmetic in a
+report and catastrophic the moment you join on that column. Mojibake in a name field
+breaks entity resolution and does nothing to a topic model.
 
-Reporting a fixed severity for a corruption is therefore not just imprecise, it is
-unhelpful to everybody: too alarming for the person who does not care, too quiet for
-the person whose pipeline it will destroy.
+So reporting one fixed severity is not just imprecise, it is unhelpful to everybody.
+Too alarming for the person who does not care. Too quiet for the person whose
+pipeline it is about to destroy.
 
-So severity here is a function of two things:
+Severity here is a function of two things:
 
     how damaged is it   x   what are you doing with it
 
 You declare the second. The library already measures the first.
 
-    audit(rows, profile=JOINS)         # leading zeros become CORRUPT
-    audit(rows, profile=SEARCH_INDEX)  # the same finding drops to INFO
+    apply_profile(result, JOINS)         # leading zeros escalate to CORRUPT
+    apply_profile(result, SEARCH_INDEX)  # the same finding drops to CLEAN
 
-Why a small fixed set rather than free configuration
------------------------------------------------------
+Why a small fixed set instead of free configuration
+----------------------------------------------------
 Six profiles cover most of what people actually do with tabular and document data,
 and a short list gets read. A configuration format gets skipped, everyone runs the
-default, and the feature may as well not exist. `custom()` is there for the cases the
-six do not fit.
+default, and the feature may as well not exist. `custom()` covers the cases the six
+do not.
 
-The weights are judgement calls, not measurements. They are in one table, visible and
-arguable, rather than buried in the detectors — which is the point. Disagree with a
-number and you can change it without touching any detection logic.
+The weights are judgement calls, not measurements. They sit in one table where you
+can see and argue with them, instead of being buried in the detectors. Disagree with
+a number and you can change it without touching any detection logic.
 """
 
 from __future__ import annotations
@@ -40,17 +40,17 @@ from .core import AuditResult, Finding, Severity
 
 # Multipliers applied to a finding's base severity, per use case.
 #
-#   0.0  irrelevant — do not report as a problem, log only
+#   0.0  irrelevant. Do not report it as a problem, just log it
 #   0.5  worth knowing, not worth stopping for
 #   1.0  as detected
-#   2.0  escalate — this breaks the thing you are doing
+#   2.0  escalate. This breaks the thing you are doing
 #
 # Read a column as "what this use case cares about".
 
 _WEIGHTS: dict[str, dict[str, float]] = {
     # Full-text search, RAG chunking, topic modelling.
     # Word boundaries and character fidelity are everything. Numbers and long-field
-    # truncation mostly are not — a truncated note still indexes.
+    # truncation mostly are not. A truncated note still indexes.
     "search_index": {
         "shattered_words": 2.0,
         "missing_glyph": 2.0,
@@ -162,8 +162,8 @@ class Profile:
     def weight_for(self, mode: str) -> float:
         """Unknown modes keep their detected severity.
 
-        A new detector should not be silently ignored just because no profile has
-        an opinion about it yet — silence is the failure this library is about.
+        A new detector should not get silently ignored just because no profile has an
+        opinion about it yet. Silence is the failure this whole library is about.
         """
         return self.weights.get(mode, self.default_weight)
 
@@ -187,8 +187,8 @@ SCIENTIFIC = Profile("scientific", _WEIGHTS["scientific"], _DESCRIPTIONS["scient
 ARCHIVE = Profile("archive", _WEIGHTS["archive"], _DESCRIPTIONS["archive"])
 CLASSIFICATION = Profile("classification", _WEIGHTS["classification"], _DESCRIPTIONS["classification"])
 
-# No profile declared. Everything reported as measured — correct when you do not yet
-# know what the data is for, which is a real and common situation.
+# No profile declared. Everything reported as measured. That is the right answer
+# when you do not yet know what the data is for, which happens a lot.
 RAW = Profile("raw", {}, "no downstream use declared; report everything as measured")
 
 ALL = [SEARCH_INDEX, ANALYTICS, JOINS, SCIENTIFIC, ARCHIVE, CLASSIFICATION, RAW]
@@ -233,10 +233,10 @@ class ProfiledResult:
 def apply_profile(result: AuditResult, profile: Profile) -> ProfiledResult:
     """Re-score one audit for a declared downstream use.
 
-    Suppressed findings are kept, not discarded. The measurement stays in the record
-    so the same audit can be re-scored for a different use later without re-reading
-    the data — which matters, because the same file usually feeds several pipelines
-    with different tolerances.
+    Suppressed findings are kept, not thrown away. The measurement stays in the
+    record, so you can re-score the same audit for a different use later without
+    re-reading the data. That matters, because one file usually feeds several
+    pipelines with different tolerances.
     """
     reported: list[Finding] = []
     suppressed: list[Finding] = []
@@ -266,9 +266,9 @@ def compare_profiles(
 ) -> str:
     """Show how the same data scores across every use case.
 
-    Often the most useful output there is. A dataset that is CLEAN for search and
-    CORRUPT for joins tells you precisely which pipeline may consume it and which
-    must not — a single overall verdict cannot say that.
+    Often the most useful thing this library prints. A dataset that is CLEAN for
+    search and CORRUPT for joins tells you exactly which pipeline can consume it and
+    which cannot. One overall verdict cannot tell you that.
     """
     results = list(results)
     profiles = list(profiles) or [p for p in ALL if p.name != "raw"]

@@ -1,42 +1,42 @@
 """
 Evolution — the pipeline grows detectors it was never shipped with.
 
-Threshold fitting tunes rules that already exist. This does something different: it
+Threshold fitting tunes rules that already exist. This does something different. It
 looks at what you rejected, finds signals that separate rejects from keeps, and
 proposes rules for signals nobody programmed.
 
 That matters because corruption is corpus-specific in ways no library author can
-anticipate. A 1970s journal scan fails differently from a born-digital preprint,
-which fails differently from a bank's CSV export. Ship a fixed detector set and it
-will be wrong somewhere. Let it mine your own rejections and it converges on what
-actually breaks in your data.
+predict. A 1970s journal scan fails differently from a born-digital preprint, which
+fails differently from a bank's CSV export. Ship a fixed detector set and it will be
+wrong somewhere. Let it mine your own rejections and it converges on what actually
+breaks in your data.
 
 What it mines
 -------------
-Three families, chosen because each is cheap to compute, cheap to explain, and has
-caught real problems:
+Three families. Each one is cheap to compute, cheap to explain, and has caught real
+problems:
 
-  CHARACTER CLASS   Over-representation of a Unicode category in rejects. Catches
-                    encoding damage — a corpus where rejects are full of Cyrillic
-                    lookalikes, or Symbol-category glyphs from a broken font map.
+  CHARACTER CLASS   A Unicode category over-represented in rejects. Catches encoding
+                    damage: a corpus where rejects are full of Cyrillic lookalikes,
+                    or Symbol-category glyphs from a broken font map.
 
-  TOKEN SHAPE       Structural token patterns: all-caps runs, repeated punctuation,
-                    single characters between spaces, tokens with mixed scripts.
+  TOKEN SHAPE       Structural token patterns. All-caps runs, repeated punctuation,
+                    single characters between spaces, tokens mixing scripts.
 
   MARKER STRING     Literal substrings over-represented in rejects. Catches the
-                    specific artifacts of one broken toolchain — "(cid:", "\\x00",
-                    a header that leaks into every failed export.
+                    fingerprints of one broken toolchain: "(cid:", "\\x00", a header
+                    that leaks into every failed export.
 
 Why proposals, not silent adoption
 -----------------------------------
 A system that invents its own rules and applies them quietly cannot be debugged, and
-will happily learn that every reject happens to contain the word "the". Every
-proposal here carries its discriminative power, its support count, and examples,
-and waits for a human. That is not timidity — an unreviewable data-quality gate is
-worse than none, because it produces confident silence.
+it will happily learn that every reject happens to contain the word "the". Every
+proposal here carries its discriminative power, its support count and examples, then
+waits for a person. That is not timidity. A data-quality gate nobody can review is
+worse than no gate, because it produces confident silence.
 
 The guard against spurious patterns is support, precision and effect size together.
-Any one alone finds noise.
+Any one of them on its own finds noise.
 """
 
 from __future__ import annotations
@@ -48,7 +48,7 @@ from dataclasses import dataclass, field
 from typing import Callable, Iterable, Literal, Sequence
 
 # A pattern must appear in at least this many rejects before it is worth a look.
-# Two rejects sharing a quirk is a coincidence; ten is a signal.
+# Two rejects sharing a quirk is a coincidence. Eight starts to look like a signal.
 MIN_SUPPORT = 8
 
 # Of the artifacts containing the pattern, at least this fraction must be rejects.
@@ -78,10 +78,10 @@ class Proposal:
 
     @property
     def strength(self) -> float:
-        """One number for ranking. Precision matters most; lift is capped.
+        """One number for ranking. Precision matters most, and lift is capped.
 
-        Uncapped lift lets a pattern appearing in three rejects and zero keeps
-        dominate one appearing in eighty rejects and two keeps, which is backwards.
+        Uncapped lift lets a pattern in three rejects and zero keeps outrank one in
+        eighty rejects and two keeps, which is backwards.
         """
         return self.precision * min(self.lift, 20.0) * (self.support ** 0.5)
 
@@ -115,13 +115,13 @@ class DetectorUtility:
     @property
     def verdict(self) -> str:
         if self.fired == 0:
-            return "never fired — consider removing, it costs time and finds nothing"
+            return "never fired. Consider removing it, since it costs time and finds nothing"
         if self.fired >= USELESS_AFTER and self.agreed == 0:
-            return "fired often, never agreed with you — retire it"
+            return "fired often, never agreed with you. Retire it"
         if self.precision < 0.3 and self.fired >= USELESS_AFTER:
-            return f"low precision ({self.precision:.0%}) — raise its threshold"
+            return f"low precision ({self.precision:.0%}). Raise its threshold"
         if self.missed > self.agreed:
-            return "misses more than it catches — its threshold may be too lax"
+            return "misses more than it catches. Its threshold may be too lax"
         return f"useful ({self.precision:.0%} precision on {self.fired} firings)"
 
     def __str__(self) -> str:
@@ -144,7 +144,7 @@ def _char_classes(text: str) -> Counter[str]:
 def _token_shapes(text: str) -> set[str]:
     """Structural shapes present in the text.
 
-    Shapes, not tokens. "ALLCAPS_RUN" generalises across corpora; the literal token
+    Shapes, not tokens. "ALLCAPS_RUN" generalises across corpora. The literal token
     "SECTION" does not.
     """
     shapes: set[str] = set()
@@ -182,8 +182,8 @@ def _token_shapes(text: str) -> set[str]:
 def _markers(text: str, max_len: int = 6) -> set[str]:
     """Short literal substrings that look like toolchain artifacts.
 
-    Restricted to strings containing a non-alphanumeric character. Natural language
-    n-grams are excluded on purpose: they are where spurious patterns live, and a
+    Limited to strings containing a non-alphanumeric character. Natural-language
+    n-grams are excluded on purpose. They are where spurious patterns live, and a
     corpus where every reject contains "the" teaches you nothing.
     """
     out: set[str] = set()
@@ -244,9 +244,9 @@ def propose_rules(
 ) -> list[Proposal]:
     """Mine new detection rules from labelled artifacts, strongest first.
 
-    Give it the raw text of things you discarded and things you kept. It returns
-    candidate rules with measured discriminative power. Nothing is applied; these
-    are for a human to accept or throw out.
+    Give it the raw text of what you discarded and what you kept. It returns
+    candidate rules with measured discriminative power. Nothing gets applied. These
+    are for you to accept or throw out.
     """
     rejected, kept = list(rejected), list(kept)
     if len(rejected) < MIN_SUPPORT:
@@ -254,7 +254,7 @@ def propose_rules(
 
     proposals: list[Proposal] = []
 
-    # character classes — compare mean rate per class
+    # character classes: compare mean rate per class
     r_classes = [_char_classes(t) for t in rejected]
     k_classes = [_char_classes(t) for t in kept]
     all_cats = {c for d in r_classes + k_classes for c in d}
@@ -317,9 +317,9 @@ def review_detectors(
 ) -> tuple[list[str], list[str]]:
     """Split detectors into keep and retire.
 
-    Retiring is as much a part of adapting to a corpus as adding. A detector that
-    fires constantly and is always overruled trains people to ignore the report,
-    which quietly disables every other detector too.
+    Retiring matters as much as adding. A detector that fires constantly and always
+    gets overruled trains people to ignore the report, which quietly disables every
+    other detector too.
     """
     keep, retire = [], []
     for u in utilities:
@@ -359,7 +359,7 @@ def evolution_report(
         lines.append(str(p))
         lines.append("")
     lines.append(
-        "None of these are active. Each is a pattern that separated your rejects "
-        "from your keeps — review before adopting, because a pattern is not a cause."
+        "None of these are active. Each one is a pattern that separated your rejects "
+        "from your keeps. Review before adopting, because a pattern is not a cause."
     )
     return "\n".join(lines)

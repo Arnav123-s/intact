@@ -1,13 +1,13 @@
 """
 Solve — hand it a broken file, get back usable data.
 
-The rest of this library reports. This module fixes. That difference matters more
-than it sounds: a tool that says "your export is corrupted, ask your vendor to send
-it again" has given you a second problem, not solved the first. Nobody wants a report.
-They want the data to work.
+The rest of this library reports. This module fixes. A tool that tells you "your
+export is corrupted, ask your vendor to send it again" has handed you a second
+problem instead of solving the first. Nobody wants a report. They want the data to
+work.
 
-So the primary output here is a working dataset. The report is a by-product you read
-only if you care why.
+So the main output here is a working dataset. The report is a by-product you read
+only if you want to know why.
 
     result = solve("vendor-export.csv")
     result.rows          # usable data, repaired
@@ -16,31 +16,31 @@ only if you care why.
 
 What it actually fixes, rather than reports
 --------------------------------------------
-ENCODING       Does not tell you the encoding was wrong. Tries the plausible
+ENCODING       Does not tell you the encoding was wrong. Tries the likely
                candidates, scores each by how much mojibake it produces, and reads
                the file correctly.
 
 DELIMITER      Does not tell you rows are ragged. Sniffs the real delimiter and
                quote character, re-parses, and checks whether that fixed the row
-               widths. Usually it does — ragged rows are nearly always a parse
+               widths. Usually it does. Ragged rows are nearly always a parse
                problem, not a data problem.
 
-TRUNCATION     Cannot restore cut text. Can isolate the affected rows so the other
-               94% flows through instead of blocking the whole load.
+TRUNCATION     Cannot restore cut text. Can isolate the affected rows so the rest
+               of the file flows through instead of blocking the whole load.
 
-EXCEL DATES    For gene symbols this is genuinely reversible — the mangling is a
-               finite known mapping, and the reverse table is published. Where a
-               domain mapping exists, it is applied; where it does not, the rows are
-               quarantined rather than guessed at.
+EXCEL DATES    For gene symbols this really is reversible. The mangling is a finite
+               known mapping and the reverse table is published. Where a domain
+               mapping exists it gets applied. Where it does not, those rows are
+               quarantined instead of guessed at.
 
 The rule
 --------
 **Fix what can be fixed. Isolate what cannot. Never guess into the output.**
 
-Anything uncertain goes to `quarantined`, which is a dataset in its own right — the
-same columns, the same order, just held back. That is the difference between
-solving and refusing: the good data moves, and the bad data is somewhere specific
-rather than somewhere unknown.
+Anything uncertain goes to `quarantined`, which is a dataset in its own right: same
+columns, same order, just held back. That is the difference between solving and
+refusing. The good data moves, and the bad data is somewhere specific rather than
+somewhere unknown.
 """
 
 from __future__ import annotations
@@ -53,7 +53,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable, Sequence
 
-from .core import Finding, Severity
+from .core import Finding, Severity, plural
 from .detectors.tabular import audit_rows
 from .repair import fix_mojibake, fix_null_string, fix_numeric_text
 
@@ -64,8 +64,8 @@ _ENCODINGS = ("utf-8-sig", "utf-8", "cp1252", "latin-1", "utf-16")
 _MOJIBAKE_MARKERS = ("Ã", "Â", "â€", "ï»¿", "�")
 
 # Excel mangles gene symbols into dates. The mapping is finite and the reverse is
-# published (Ziemann et al. 2016 documented the scale of it; the HGNC eventually
-# renamed the genes). Only symbols whose date form is unambiguous are listed — a
+# published. Ziemann et al. 2016 documented the scale of it, and the HGNC eventually
+# renamed the genes. Only symbols whose date form is unambiguous are listed here. A
 # reverse map that guesses is worse than one that abstains.
 GENE_DATE_MAP: dict[str, str] = {
     "1-Mar": "MARCH1", "2-Mar": "MARCH2", "3-Mar": "MARCH3", "4-Mar": "MARCH4",
@@ -83,7 +83,7 @@ GENE_DATE_MAP: dict[str, str] = {
 
 @dataclass
 class Action:
-    """One thing that was actually done, not one thing that was observed."""
+    """One thing that was actually done, not one thing that was noticed."""
 
     what: str
     detail: str
@@ -114,10 +114,10 @@ class Solution:
     @property
     def report(self) -> str:
         lines = [
-            f"read as        : {self.encoding}, delimiter {self.delimiter!r}",
-            f"usable rows    : {len(self.rows)}",
-            f"quarantined    : {len(self.quarantined)}",
-            f"recovered      : {self.recovered_fraction:.1%}",
+            f"read as     : {self.encoding}, delimiter {self.delimiter!r}",
+            f"usable rows : {len(self.rows):,}",
+            f"quarantined : {len(self.quarantined):,}",
+            f"recovered   : {self.recovered_fraction:.1%}",
             "",
         ]
         if self.actions:
@@ -127,13 +127,13 @@ class Solution:
             lines.append("Nothing needed fixing.")
         if self.quarantined:
             lines.append("")
-            lines.append(f"Held back ({len(self.quarantined)} rows):")
+            lines.append(f"Held back ({plural(len(self.quarantined), 'row')}):")
             for r in Counter(self.quarantine_reasons).most_common():
-                lines.append(f"  {r[1]} rows — {r[0]}")
+                lines.append(f"  {plural(r[1], 'row')}: {r[0]}")
             lines.append("")
             lines.append(
                 "These are in `.quarantined` with the same columns. The rest of the "
-                "data is usable now; nothing is blocked waiting on them."
+                "data is usable now. Nothing is blocked waiting on them."
             )
         return "\n".join(lines)
 
@@ -142,15 +142,15 @@ class Solution:
 
 
 def _looks_like_utf16(raw: bytes) -> bool:
-    """UTF-16 text is full of null bytes; ASCII and UTF-8 are not.
+    """UTF-16 text is full of null bytes. ASCII and UTF-8 are not.
 
-    This guard exists because of a real bug. Scoring encodings purely by mojibake
-    markers let UTF-16 win on plain ASCII: decoding ASCII as UTF-16 produces
-    CJK-looking characters that contain no mojibake markers at all, so it scored
-    zero — a perfect score — and the file was silently turned into garbage.
+    This guard exists because of a real bug. Scoring encodings only by mojibake
+    markers let UTF-16 win on plain ASCII. Decoding ASCII as UTF-16 produces
+    CJK-looking characters with no mojibake markers in them at all, so it scored
+    zero, which is a perfect score, and the file was silently turned into garbage.
 
-    A byte-order mark is decisive. Failing that, real UTF-16 of mostly-Latin text has
-    a null byte for roughly every other character; anything under a third is not
+    A byte-order mark settles it. Failing that, real UTF-16 of mostly-Latin text has
+    a null byte for roughly every other character. Anything under a third is not
     UTF-16 whatever it decodes to.
     """
     if raw[:2] in (b"\xff\xfe", b"\xfe\xff"):
@@ -164,16 +164,16 @@ def _looks_like_utf16(raw: bytes) -> bool:
 def detect_encoding(raw: bytes) -> tuple[str, int]:
     """Pick the encoding that decodes with the least damage.
 
-    Scored by mojibake markers and replacement characters rather than by whether the
-    decode raises — latin-1 decodes anything without error and is wrong most of the
-    time, so "it didn't throw" is not evidence.
+    Scored by mojibake markers and replacement characters, not by whether the decode
+    raises. latin-1 decodes anything without error and is wrong most of the time, so
+    "it did not throw" proves nothing.
 
     Ties go to the earlier candidate, because `_ENCODINGS` is ordered by how likely
-    each is in practice.
+    each one is in practice.
     """
-    # A byte-order mark is not a hint, it is a declaration. Nothing else gets a vote,
-    # because every 8-bit codec will happily decode UTF-16 bytes into scoreless
-    # garbage and win on a tie.
+    # A byte-order mark is not a hint, it is a declaration. Nothing else gets a vote.
+    # Every 8-bit codec will happily decode UTF-16 bytes into scoreless garbage and
+    # win on a tie.
     if raw[:2] in (b"\xff\xfe", b"\xfe\xff"):
         return "utf-16", 0
     if raw[:3] == b"\xef\xbb\xbf":
@@ -202,9 +202,9 @@ def detect_encoding(raw: bytes) -> tuple[str, int]:
 def detect_dialect(text: str) -> tuple[str, str]:
     """Find the delimiter and quote char that produce consistent row widths.
 
-    csv.Sniffer is tried first and usually right. When it is not, candidates are
-    scored by how many rows come out with the modal width — the correct dialect is
-    the one that makes the table rectangular.
+    csv.Sniffer goes first and is usually right. When it is not, candidates are
+    scored by how many rows come out at the modal width. The correct dialect is the
+    one that makes the table rectangular.
     """
     sample = "\n".join(text.splitlines()[:50])
     try:
@@ -269,14 +269,15 @@ def solve(
 
     if delim != ",":
         sol.actions.append(Action(
-            "delimiter", f"detected {delim!r}, not a comma — parsed with it",
+            "delimiter", f"detected {delim!r}, not a comma, and parsed with it",
         ))
 
     ragged = [r for r in body if len(r) != width]
     if ragged:
         sol.actions.append(Action(
-            "ragged rows", f"{len(ragged)} rows had the wrong field count after "
-            f"parsing; held back rather than shifted into the wrong columns",
+            "ragged rows", f"{plural(len(ragged), 'row')} had the wrong field "
+            f"count after parsing. Held back rather than shifted into the wrong "
+            f"columns",
             len(ragged),
         ))
 
@@ -287,7 +288,7 @@ def solve(
         else:
             sol.quarantined.append(list(r))
             sol.quarantine_reasons.append(
-                f"field count {len(r)}, expected {width} — unescaped delimiter"
+                f"field count {len(r)}, expected {width} (unescaped delimiter)"
             )
 
     # 3. Repair cell by cell. Only reversible transforms touch the output.
@@ -368,8 +369,8 @@ def solve(
                 if cut:
                     sol.quarantined.append(r)
                     sol.quarantine_reasons.append(
-                        f"value in {cut!r} truncated at a length limit — the rest of "
-                        f"the text is not in this file"
+                        f"value in {cut!r} truncated at a length limit, so the rest "
+                        f"of the text is not in this file"
                     )
                 else:
                     survivors.append(r)
@@ -377,7 +378,7 @@ def solve(
                 sol.actions.append(Action(
                     "truncation",
                     f"isolated rows with cut-off values so the remaining "
-                    f"{len(survivors)} rows are usable now",
+                    f"{plural(len(survivors), 'row')} can be used",
                     len(keep) - len(survivors),
                 ))
             keep = survivors
@@ -391,9 +392,9 @@ def solve_to_files(
 ) -> tuple[Path, Path | None, Path]:
     """Solve a file and write three outputs: clean data, quarantine, report.
 
-    Three files rather than one because they have three different readers — the
+    Three files rather than one because they have three different readers. The
     pipeline consumes the clean data, whoever owns the source deals with the
-    quarantine, and a human reads the report once.
+    quarantine, and a person reads the report once.
     """
     src = Path(source)
     out = Path(out_dir)

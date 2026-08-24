@@ -1,13 +1,13 @@
 """
-Tests for the extraction audit.
+Tests for the text detector.
 
-These are written to fail. During development the fragment detector returned "clean"
-on deliberately shattered text — a detector that cannot detect is worse than none,
-because it produces confident silence. Every case below exists because something
-either did go wrong or plausibly could.
+These are written to fail. While building this, the fragment detector returned
+"clean" on deliberately shattered text. A detector that cannot detect is worse than
+no detector, because it produces confident silence. Every case below exists because
+something either did go wrong or plausibly could.
 
-Run with:  python -m pytest tests/ -v
-       or: python tests/test_extraction_audit.py
+Run with:  python -m unittest discover -s tests
+       or: python tests/test_text_detector.py
 """
 
 from __future__ import annotations
@@ -40,7 +40,7 @@ def _shatter(text: str, p: float, seed: int = 7) -> str:
     """Simulate character-positioning failure: words chopped into 2-4 char runs.
 
     Note the shape. An earlier version split each word exactly once, which leaves a
-    long tail piece and does NOT reproduce the real failure — that bug hid a broken
+    long tail piece and does NOT reproduce the real failure. That bug hid a broken
     detector behind a passing test. Real shattering fragments a word throughout.
     """
     rng = random.Random(seed)
@@ -115,8 +115,8 @@ def test_moderate_shattering_is_corrupt():
 def test_light_shattering_is_at_least_suspect():
     """Regression: this returned CLEAN and it should not have.
 
-    One split per long word is visibly damaged text — "The sel ection of ca ndidate"
-    — and a reader would reject it. The threshold was lowered specifically for this.
+    One split per long word is visibly damaged text: "The sel ection of ca ndidate".
+    A reader would reject that. The threshold was lowered specifically for it.
     """
     rng = random.Random(7)
     out = []
@@ -150,7 +150,7 @@ def test_digits_as_control_bytes_are_detected():
 
 
 def test_numeric_loss_flagged_even_when_prose_is_intact():
-    """Digits stripped entirely — no control bytes, so only the digit test can catch it."""
+    """Digits stripped entirely. No control bytes, so only the digit test catches it."""
     text = "".join(" " if ch.isdigit() else ch for ch in CLEAN)
     r = audit_text(text)
     modes = {f.mode for f in r.findings}
