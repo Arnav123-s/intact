@@ -3,31 +3,31 @@ Repair — fix what is provably fixable, and refuse the rest.
 
 The useful question about corrupted data is not "can you clean it?" It is:
 
-    Is the original information still present in this file, or is it gone?
+    Is the original information still in this file, or is it gone?
 
-Those need opposite responses. Mojibake is a reversible byte-level mistake: the
+Those two need opposite responses. Mojibake is a reversible byte-level mistake. The
 original characters are still there, encoded wrongly, and one decode reverses it
-exactly. An Excel-mangled gene symbol is not: SEPT2 became 2-Sep, and no amount of
-cleverness recovers which of SEPT2 or a September date it was. One of those you fix.
-The other you must go back to the source for, and any tool that "cleans" it is
-manufacturing data.
+exactly. An Excel-mangled gene symbol is not. SEPT2 became 2-Sep, and nothing
+recovers whether that was SEPT2 or a September date. You fix the first one. For the
+second you have to go back to the source, and any tool that "cleans" it is inventing
+data.
 
 So every repair here is classified, and the classification is enforced:
 
-  REVERSIBLE    The transformation is provably invertible. Applied on request.
-  LOSSY         Recoverable in most cases but can guess wrong. Requires opt-in and
-                reports every value it changed.
-  IRRECOVERABLE Information is destroyed. Never repaired. Reported so you know to
-                re-export rather than proceed.
+  REVERSIBLE    Provably invertible. Applied on request.
+  LOSSY         Usually right, but it can guess wrong. Needs opt-in, and reports
+                every value it changed.
+  IRRECOVERABLE The information is gone. Never repaired. Reported so you know to
+                re-export instead of carrying on.
 
 Three rules
 -----------
 1. **Never guess silently.** A repair that might be wrong reports every value it
-   touched, so the change is reviewable.
+   touched, so you can review the change.
 2. **Always keep the original.** Every `Repair` carries before and after. A repair
    you cannot undo is a second corruption.
-3. **Refusing is a result.** `IRRECOVERABLE` is the most valuable verdict this module
-   produces, because it is the one that stops you shipping a dataset you believe is
+3. **Refusing is a result.** `IRRECOVERABLE` is the most useful verdict this module
+   produces, because it is the one that stops you shipping a dataset you think is
    clean.
 """
 
@@ -39,7 +39,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Callable, Iterable, Sequence
 
-from .core import Finding, Severity
+from .core import Finding, Severity, plural
 
 
 class Recoverability(str, Enum):
@@ -105,8 +105,8 @@ class RepairResult:
         """True only if nothing was refused.
 
         A file with repairs applied and no refusals is trustworthy. A file with even
-        one refusal is not, no matter how much else was fixed — which is why this is
-        an `and`, not a score.
+        one refusal is not, no matter how much else got fixed. That is why this is an
+        `and` and not a score.
         """
         return not self.refusals
 
@@ -122,8 +122,8 @@ class RepairResult:
             lines.extend(f"  {r}" for r in self.refusals)
             lines.append("")
             lines.append(
-                "This data cannot be made correct by processing. Re-export from the "
-                "source with the fixes above, or proceed knowing these values are wrong."
+                "Processing cannot make this data correct. Re-export from the source "
+                "with the fixes above, or carry on knowing these values are wrong."
             )
         if not lines:
             lines.append("Nothing to repair.")
@@ -139,8 +139,8 @@ def fix_mojibake(value: str) -> str | None:
     """Reverse UTF-8-decoded-as-Latin-1. Returns None if it does not apply.
 
     The check is strict on purpose. Round-tripping text that was never mojibake can
-    corrupt legitimate Latin-1 content, so this only fires when the result both
-    decodes cleanly AND removes the marker sequences that indicated the problem.
+    corrupt real Latin-1 content, so this only fires when the result both decodes
+    cleanly AND removes the marker sequences that flagged the problem.
     """
     if not any(m in value for m in _MOJIBAKE_MARKERS):
         return None
@@ -162,9 +162,9 @@ _NUMERIC = re.compile(r"^[+-]?(\d{1,3}(,\d{3})*|\d+)(\.\d+)?([eE][+-]?\d+)?$")
 def fix_numeric_text(value: str) -> str | None:
     """Strip thousands separators so a numeric-looking string parses.
 
-    Deliberately conservative: returns a normalised string rather than a float, so
-    precision is never lost to a binary float on the way through. The caller decides
-    the target type.
+    Deliberately conservative. It returns a normalised string rather than a float, so
+    precision never gets lost to a binary float on the way through. You pick the
+    target type.
     """
     v = value.strip()
     if not _NUMERIC.match(v) or "," not in v:
@@ -197,11 +197,11 @@ def fix_duplicate_headers(header: Sequence[str]) -> list[str] | None:
 
 
 def fix_leading_zeros(values: Sequence[str], width: int | None = None) -> dict[str, str] | None:
-    """Zero-pad identifiers to a consistent width. LOSSY — it infers the width.
+    """Zero-pad identifiers to a consistent width. LOSSY, because it infers the width.
 
-    If the true width is not supplied, the most common length is assumed. That is
-    usually right and occasionally wrong, which is exactly why this is classified
-    LOSSY and reports every value it changes.
+    If you do not supply the true width, it assumes the most common length. That is
+    usually right and sometimes wrong, which is why this is classified LOSSY and
+    reports every value it changes.
     """
     digits = [v for v in values if v.isdigit()]
     if len(digits) < 3:
@@ -217,7 +217,7 @@ def fix_leading_zeros(values: Sequence[str], width: int | None = None) -> dict[s
 _IRRECOVERABLE: dict[str, tuple[str, str]] = {
     "excel_date_corruption": (
         "Excel replaced the original value with a date. The mapping is many-to-one "
-        "and not invertible — '2-Sep' could have been SEPT2, or an actual date.",
+        "and not invertible. '2-Sep' could have been SEPT2, or a real date.",
         "Re-export from the source with the column formatted as Text before opening "
         "in Excel, or open the file with a tool that does not auto-convert.",
     ),
@@ -259,8 +259,8 @@ def repair_column(
 ) -> tuple[list[str], RepairResult]:
     """Apply every safe repair to one column, refusing what cannot be recovered.
 
-    Returns the repaired values and a full account of what was and was not done.
-    The originals are never modified in place.
+    Returns the repaired values and a full account of what was and was not done. It
+    never modifies the originals in place.
     """
     out = list(values)
     result = RepairResult()
@@ -271,8 +271,8 @@ def repair_column(
         if f.mode in _IRRECOVERABLE:
             reason, action = _IRRECOVERABLE[f.mode]
             # `metric` is a ratio for most detectors but an absolute count for a
-            # few (excel dates). Treating a count as a ratio produced an "affected"
-            # figure larger than the table. Anything >1 is already a count.
+            # few, like excel dates. Treating a count as a ratio gave an "affected"
+            # figure bigger than the table. Anything above 1 is already a count.
             if f.metric is None:
                 affected = len(f.samples)
             elif f.metric > 1:
@@ -327,7 +327,7 @@ def repair_column(
                     mode="leading_zero_loss", recoverability=Recoverability.LOSSY,
                     location=loc, changed=changed, total=len(out),
                     examples=tuple(examples),
-                    note=("width inferred from the most common length — verify these "
+                    note=("width inferred from the most common length. Check these "
                           "against the source before relying on joins"),
                 ))
         else:
@@ -358,7 +358,7 @@ def summarise_recoverability(results: Iterable[RepairResult]) -> str:
         lines.append("")
         lines.append("This dataset cannot be made correct by processing:")
         for mode, n in by_mode.most_common():
-            lines.append(f"  {mode}: {n} location(s)")
+            lines.append(f"  {mode}: {plural(n, 'location')}")
         lines.append("")
         lines.append("Go back to the source. Processing further only hides it.")
     elif repairs:

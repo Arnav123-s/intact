@@ -277,7 +277,7 @@ check("xlsx read with stdlib only", "book.xlsx#sheet1" in by_name)
 check("README skipped", "README.md" not in by_name)
 check("broken json reported not raised",
       any("could not read" in n for n in by_name["bad.json"].notes))
-check("inventory renders", "source(s)" in sources.inventory(tmp))
+check("inventory renders", "source" in sources.inventory(tmp))
 
 
 # =====================================================================

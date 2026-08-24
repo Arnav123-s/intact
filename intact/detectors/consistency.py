@@ -1,50 +1,51 @@
 """
-Consistency — learn what a file's own conventions are, then flag what breaks them.
+Consistency — learn a file's own conventions, then flag what breaks them.
 
-Every other detector in this package applies a rule written in advance: 255 characters
-is suspicious, these strings mean null, this regex is a date. Rules written in advance
-are wrong in ways their author cannot anticipate, which is exactly how the truncation
-detector produced two false positives on real NYC data before the guards were added.
+Every other detector here applies a rule written in advance: 255 characters is
+suspicious, these strings mean null, this regex is a date. Rules written in advance
+are wrong in ways their author cannot see coming. That is how my truncation rule
+produced two false positives on real NYC data before I added the guards.
 
 This one carries no rules about what corruption looks like. It learns what *this
-column* looks like, and reports what does not fit.
+column* looks like and reports what does not fit.
 
     Every date in this column reads 2026-09-02. One cell says 2-Sep.
-    That cell is anomalous relative to this file's own convention.
+    That cell breaks this file's own convention.
 
-Why that is worth having separately
-------------------------------------
+Why it is worth having separately
+----------------------------------
 1. **No labels, no training, no prior knowledge.** It works on the first file it ever
-   sees, because the reference it compares against is the file itself.
+   sees, because the thing it compares against is the file itself.
 
 2. **It catches things nobody thought of.** A fixed rule only finds corruption its
    author knew about. This finds anything that breaks a pattern, including failure
-   modes that have no name yet.
+   modes that do not have a name yet.
 
-3. **It disambiguates where fixed rules cannot.** The Excel-date detector cannot tell
-   a mangled gene symbol from a genuine September date — both match the same regex.
-   Consistency can: if every other value in the column is an ISO date, `2-Sep` does
-   not belong; if the column is full of `%d-%b` dates, it does.
+3. **It can tell apart what fixed rules cannot.** The Excel-date detector cannot tell
+   a mangled gene symbol from a real September date, because both match the same
+   regex. This one can. If every other value in the column is an ISO date, `2-Sep`
+   does not belong. If the column is full of `%d-%b` dates, it does.
 
-4. **It is quiet on consistent data, however strange.** 7,655 identical agency names
-   are perfectly consistent, so nothing is reported. That is the correct answer, and
-   it is the answer a length-based rule got wrong.
+4. **It stays quiet on consistent data, however strange.** 7,655 identical agency
+   names are perfectly consistent, so it reports nothing. That is the right answer,
+   and it is the one my length-based rule got wrong.
 
 How it works
 ------------
-Each value is reduced to a **shape** — its structural skeleton with the specific
-characters thrown away:
+Each value gets reduced to a **shape**: its structural skeleton with the specific
+characters thrown away.
 
-    "2026-09-02"  ->  "dddd-dd-dd"
-    "2-Sep"       ->  "d-Aaa"
-    "(555) 010-9"  -> "(ddd) ddd-d"
+    "2026-09-02"   ->  "dddd-dd-dd"
+    "2-Sep"        ->  "d-Mmm"
+    "(555) 010-9"  ->  "(ddd) ddd-d"
 
-Then the shape distribution is examined. A column where one shape covers almost
-everything has a convention; values outside it are anomalies. A column with no
-dominant shape has no convention, so nothing is reported — free text is not an error.
+Then it looks at the shape distribution. A column where one shape covers almost
+everything has a convention, and values outside it are anomalies. A column with no
+dominant shape has no convention, so nothing gets reported. Free text is not an
+error.
 
-The dominance threshold matters and is deliberately high. A column that is 60/40
-between two shapes has two legitimate formats, not 40% corruption.
+The dominance threshold is deliberately high. A column split 60/40 between two shapes
+has two legitimate formats, not 40% corruption.
 """
 
 from __future__ import annotations
@@ -53,7 +54,7 @@ import re
 from collections import Counter
 from typing import Iterable, Sequence
 
-from ..core import AuditResult, Finding, Severity
+from ..core import AuditResult, Finding, Severity, plural
 
 # A column needs at least this fraction on one shape before it is treated as having a
 # convention at all. Set high on purpose: two competing formats is not corruption.
@@ -77,12 +78,12 @@ _MONTHS = (
 def shape(value: str, keep_length: bool = False) -> str:
     """Reduce a value to its structural skeleton.
 
-    Digits become `d`, letters `a`/`A`, and runs are collapsed so that "12" and
-    "123456" do not read as different formats. Month abbreviations are preserved as a
-    distinct token, because `2-Sep` and `2-XYZ` are structurally identical but only
-    one of them is a date, and that distinction is the whole point of this detector.
+    Digits become `d`, letters become `a` or `A`, and runs are collapsed so "12" and
+    "123456" do not read as different formats. Month abbreviations survive as their
+    own token, because `2-Sep` and `2-XYZ` are structurally identical but only one of
+    them is a date, and that difference is the whole point of this detector.
 
-    Punctuation is kept verbatim — it carries the format.
+    Punctuation is kept verbatim. It carries the format.
     """
     v = value.strip()
     if not v:
@@ -163,7 +164,7 @@ def audit_column(
     by_shape = Counter(s for _, s in anomalies)
 
     # Rare shapes are the interesting ones. A shape appearing many times is a variant
-    # the column tolerates; a shape appearing twice is an accident.
+    # the column tolerates. A shape appearing twice is an accident.
     isolated = {s for s, c in by_shape.items() if c < MIN_ANOMALY_ISOLATION}
     examples = [v for v, s in anomalies if s in isolated][:5]
     if not examples:
@@ -172,9 +173,10 @@ def audit_column(
     severity = Severity.SUSPECT if rate < 0.01 else Severity.CORRUPT
 
     detail = (
-        f"{share:.0%} of values follow the pattern {top_shape!r}, but "
-        f"{len(anomalies)} do not. Nothing here knows what this column is supposed "
-        f"to contain — these values simply do not match what the column itself does"
+        f"{share:.0%} of values follow the pattern {top_shape!r}. "
+        f"{plural(len(anomalies), 'value')} did not. Nothing here knows what this "
+        f"column is meant to hold. These values just do not match what the rest of "
+        f"the column does"
     )
 
     return AuditResult(
@@ -216,9 +218,9 @@ def describe_conventions(
 ) -> str:
     """Report what conventions were learned, not just what broke them.
 
-    Useful on its own. Being told what a file's columns actually look like is often
-    more informative than being told nothing is wrong — and it makes the anomaly
-    findings legible, because you can see the pattern they broke.
+    Useful on its own. Being told what a file's columns actually look like often
+    tells you more than being told nothing is wrong. It also makes the anomaly
+    findings readable, because you can see the pattern they broke.
     """
     rows = [list(r) for r in rows]
     if not rows:
@@ -241,11 +243,12 @@ def describe_conventions(
         if share >= DOMINANCE:
             lines.append(
                 f"  {str(name).ljust(width)}  {share:>4.0%} follow {top!r}"
-                + (f"  ({len(counts) - 1} other shape(s))" if len(counts) > 1 else "")
+                + (f"  ({plural(len(counts) - 1, 'other shape')})"
+                   if len(counts) > 1 else "")
             )
         else:
             lines.append(
                 f"  {str(name).ljust(width)}  no dominant pattern "
-                f"({len(counts)} shapes, top {share:.0%}) — free text, not checked"
+                f"({len(counts)} shapes, top {share:.0%}): free text, not checked"
             )
     return "\n".join(lines)

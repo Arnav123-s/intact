@@ -2,8 +2,8 @@
 Stream — constant memory, however large the input.
 
 `solve()` reads a file into memory. That is fine for an export you could open in a
-spreadsheet and useless for the ones you cannot, which are exactly the ones where
-silent corruption hurts most: nobody eyeballs a ten-gigabyte file, so nothing catches
+spreadsheet and useless for the ones you cannot. Those are exactly the files where
+silent corruption hurts most. Nobody eyeballs a ten-gigabyte file, so nothing catches
 the column that stopped being a number two million rows in.
 
 This module does the same work in bounded memory.
@@ -13,26 +13,25 @@ The trick is that nothing here needs the data twice
 Every statistic the detectors use is an aggregate, and every aggregate has an
 incremental form:
 
-    "12% of values are fragments"       -> two counters
-    "18 values sit at exactly 255 chars"-> a Counter over lengths
-    "digits appear in 0.03% of tokens"  -> two counters
+    "12% of values are fragments"        -> two counters
+    "18 values sit at exactly 255 chars" -> a Counter over lengths
+    "digits appear in 0.03% of tokens"   -> two counters
 
-So a column's verdict can be computed from counters that grow with the number of
-*distinct lengths*, not the number of rows. A billion-row file and a thousand-row
-file use the same memory.
+So a column's verdict comes from counters that grow with the number of *distinct
+lengths*, not the number of rows. A billion-row file and a thousand-row file use the
+same memory.
 
-Two things genuinely need bounded state, and both are capped:
+Two things really do need bounded state, and both are capped:
 
-    examples        first N per finding, so a report can show evidence
+    examples          first N per finding, so a report can show evidence
     length histogram  distinct lengths only, capped and then coarsened
 
 What it costs
 -------------
-One pass, no random access, so anything requiring a second look at an earlier row
-is out. In practice that means: no cross-row deduplication and no "compare this value
-to the median" rules. Everything currently implemented is single-pass, and any future
-detector should be too — that constraint is a feature, because it is what keeps this
-usable on files you cannot hold.
+One pass, no random access, so anything needing a second look at an earlier row is
+out. In practice that rules out cross-row deduplication and any "compare this value
+to the median" rule. Everything here is single-pass and any future detector should be
+too. That constraint is what keeps this usable on files you cannot hold.
 """
 
 from __future__ import annotations
@@ -46,7 +45,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Iterable, Iterator, Sequence, TextIO
 
-from .core import AuditResult, Finding, Severity
+from .core import AuditResult, Finding, Severity, plural
 from .repair import fix_mojibake, fix_null_string, fix_numeric_text
 from .solve import GENE_DATE_MAP, _MOJIBAKE_MARKERS, detect_dialect, detect_encoding
 
@@ -90,8 +89,8 @@ class ColumnStats:
     lengths: Counter[int] = field(default_factory=Counter)
     examples: dict[str, list[str]] = field(default_factory=dict)
     # Distinct values seen at each candidate truncation limit. Real truncation cuts
-    # many different values to one length; a single repeated long name does not.
-    # Capped so a genuinely truncated column cannot grow this without bound.
+    # many different values to one length. A single repeated long name does not.
+    # Capped, so a genuinely truncated column cannot grow this without bound.
     at_limit: dict[int, set[str]] = field(default_factory=dict)
 
     def _example(self, mode: str, value: str) -> None:
@@ -182,8 +181,9 @@ class ColumnStats:
                     metric=ratio, threshold=0.95,
                     location=f"column {self.name!r}",
                     detail=(
-                        f"{ratio:.0%} of values parse as numbers but are stored as "
-                        f"text — aggregations will be wrong or silently skipped"
+                        f"{ratio:.0%} of values are numbers carrying display "
+                        f"formatting. A cast to a numeric type will fail or silently "
+                        f"produce nulls"
                     ),
                 ))
 
@@ -203,7 +203,7 @@ class ColumnStats:
                         metric=at / self.non_empty, threshold=0.03,
                         location=f"column {self.name!r}",
                         detail=(
-                            f"{at} values are exactly {limit} characters — the "
+                            f"{at} values are exactly {limit} characters, the "
                             f"signature of a VARCHAR({limit}) limit upstream"
                         ),
                     ))
@@ -216,7 +216,7 @@ class ColumnStats:
                     location=f"column {self.name!r}",
                     detail=(
                         f"{self.nullish} values are null-like strings rather than "
-                        f"real nulls — they pass not-null checks"
+                        f"real nulls, so they pass not-null checks"
                     ),
                     samples=tuple(self.examples.get("null_as_string", [])),
                 ))
@@ -286,7 +286,7 @@ class StreamResult:
             lines.append("")
             lines.append("Held back:")
             for reason, n in self.quarantine_reasons.most_common():
-                lines.append(f"  {n:,} rows — {reason}")
+                lines.append(f"  {plural(n, 'row')}: {reason}")
         return "\n".join(lines)
 
 
@@ -351,7 +351,7 @@ def solve_stream(
             if len(row) != width:
                 result.rows_quarantined += 1
                 result.quarantine_reasons[
-                    f"field count {len(row)}, expected {width} — unescaped delimiter"
+                    f"field count {len(row)}, expected {width} (unescaped delimiter)"
                 ] += 1
                 if out_quarantine:
                     if quarantine_writer is None:

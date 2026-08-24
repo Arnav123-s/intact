@@ -1,7 +1,7 @@
 """intact — hand it a broken data file, get back usable data."""
 
 from .solve import solve, solve_to_files, Solution
-from .core import AuditResult, Finding, Severity, report, summarise
+from .core import AuditResult, Finding, Severity, plural, report, summarise
 from .pipeline import Pipeline
 from .repair import Recoverability, RepairResult, repair_column
 from .evolution import propose_rules, evolution_report
@@ -17,7 +17,7 @@ __all__ = [
     # the main entry point
     "solve", "solve_to_files", "Solution",
     # inspection
-    "AuditResult", "Finding", "Severity", "report", "summarise",
+    "AuditResult", "Finding", "Severity", "report", "summarise", "plural",
     # scoring for a downstream use
     "apply_profile", "compare_profiles", "custom",
     "ANALYTICS", "ARCHIVE", "CLASSIFICATION", "JOINS", "RAW",

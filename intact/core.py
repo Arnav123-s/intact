@@ -1,30 +1,26 @@
 """
 Core types shared by every detector.
 
-The premise of this library is narrow and, once you have been bitten by it, obvious:
+Most data pipelines cannot tell you whether what they read is intact. They give you
+back a dataframe, a string, a record count. Those look the same whether the source
+was read correctly or mangled on the way in. Nothing throws an error. You get data,
+it has the right shape, and some of it is wrong.
 
-    Most data pipelines cannot tell you whether what they ingested is intact.
-
-They return a dataframe, a string, a record count. All of those look identical
-whether the source was read correctly or mangled on the way in. The failure is not
-an exception — it is a silence. You get data, it has the right shape, and some
-fraction of it is wrong.
-
-Every detector in this package answers one question about one artifact: *is this
-what the source actually said?* — and returns evidence, never a bare boolean,
-because a caller deciding to quarantine ten thousand rows deserves to see why.
+Every detector here answers one question about one artifact: is this what the source
+actually said? It returns evidence rather than a bare boolean. If you are about to
+quarantine ten thousand rows you should get to see why.
 
 Three rules the detectors follow
 --------------------------------
 1. **Evidence, not verdicts.** A `Finding` carries the measured value, the threshold
-   it crossed, and concrete examples. Anyone can then disagree with the threshold
-   without losing the measurement.
+   it crossed, and real examples. You can disagree with a threshold without losing
+   the measurement.
 
 2. **Refuse to judge too little.** Statistics on forty rows are noise. Detectors
-   return nothing rather than guessing, and say which is which.
+   return nothing rather than guessing, and say so.
 
 3. **Worst wins, never the average.** One corrupt page in fifty, one broken column
-   in thirty — averaging hides exactly the thing this library exists to surface.
+   in thirty. Averaging hides the thing you needed to know about.
 """
 
 from __future__ import annotations
@@ -35,8 +31,16 @@ from enum import Enum
 from typing import Iterable
 
 
+def plural(n: int, singular: str, many: str = "") -> str:
+    """Count with a noun that agrees with it: plural(1, "row") -> "1 row".
+
+    Report text gets read by people. "1 rows" tells them nobody read it back.
+    """
+    return f"{n:,} {singular if n == 1 else (many or singular + 's')}"
+
+
 class Severity(str, Enum):
-    """How bad, in three steps that map to three actions."""
+    """How bad it is, in three steps that map to three actions."""
 
     CLEAN = "clean"       # ingest it
     SUSPECT = "suspect"   # ingest it, but flag for review
@@ -51,9 +55,9 @@ class Severity(str, Enum):
 class Finding:
     """One detected problem, carrying the evidence that produced it.
 
-    `mode` is a free-form string rather than an enum so detectors can be added
-    without editing this file. The cost is no central registry of modes; the
-    benefit is that a new detector is a new file and nothing else.
+    `mode` is a free-form string rather than an enum so you can add a detector
+    without editing this file. The cost is that there is no central registry of
+    modes. The benefit is that a new detector is a new file and nothing else.
     """
 
     mode: str
@@ -62,7 +66,7 @@ class Finding:
     metric: float | None = None
     threshold: float | None = None
     samples: tuple[str, ...] = ()
-    location: str = ""     # page 14, column "revenue", row 8821 - wherever it is
+    location: str = ""     # page 14, column "revenue", row 8821, wherever it is
 
     def __str__(self) -> str:
         where = f" @ {self.location}" if self.location else ""
@@ -75,10 +79,10 @@ class Finding:
 
 @dataclass
 class AuditResult:
-    """Verdict for one artifact - a page, a column, a file, a table."""
+    """Verdict for one artifact: a page, a column, a file, a table."""
 
     findings: list[Finding] = field(default_factory=list)
-    units: int = 0             # rows, tokens, cells - whatever was examined
+    units: int = 0             # rows, tokens, cells, whatever was examined
     judged: bool = True        # False when there was too little to say anything
     subject: str = ""
 
@@ -96,8 +100,8 @@ class AuditResult:
     def confidence(self) -> float:
         """1.0 clean, falling with each finding and how far past threshold it sits.
 
-        Overshoot is capped: a metric ten times its threshold is not ten times worse
-        than one at twice, and letting it run makes the number meaningless.
+        Overshoot is capped. A metric ten times its threshold is not ten times worse
+        than one at double, and letting it run makes the number meaningless.
         """
         score = 1.0
         for f in self.findings:
@@ -118,12 +122,12 @@ class AuditResult:
     def __str__(self) -> str:
         subj = f"{self.subject}: " if self.subject else ""
         if not self.judged:
-            return f"{subj}not judged - too little data ({self.units} units)"
+            return f"{subj}not judged: too little data ({plural(self.units, 'unit')})"
         if not self.findings:
-            return f"{subj}clean ({self.units} units, confidence {self.confidence:.2f})"
+            return f"{subj}clean ({plural(self.units, 'unit')}, confidence {self.confidence:.2f})"
         lines = [
-            f"{subj}{self.severity.value} - confidence {self.confidence:.2f}, "
-            f"{self.units} units"
+            f"{subj}{self.severity.value}, confidence {self.confidence:.2f}, "
+            f"{plural(self.units, 'unit')}"
         ]
         lines.extend(f"  {f}" for f in self.findings)
         return "\n".join(lines)
@@ -132,12 +136,12 @@ class AuditResult:
 def summarise(results: Iterable[AuditResult]) -> dict[str, object]:
     """Roll many artifact-level results into one verdict.
 
-    Severity is the maximum, never the mean. A dataset is exactly as trustworthy as
-    its worst column; averaging a single corrupt column across thirty clean ones
-    produces a reassuring number and an unusable dataset.
+    Severity is the maximum, never the mean. A dataset is only as trustworthy as its
+    worst column. Average one corrupt column across thirty clean ones and you get a
+    reassuring number attached to an unusable dataset.
 
-    Unjudged artifacts are excluded from the confidence average so a nearly-empty
-    file cannot flatter the result.
+    Unjudged artifacts are left out of the confidence average, so a nearly-empty file
+    cannot flatter the result.
     """
     results = list(results)
     if not results:
@@ -174,9 +178,8 @@ def summarise(results: Iterable[AuditResult]) -> dict[str, object]:
 def report(results: Iterable[AuditResult], show_clean: bool = False) -> str:
     """Human-readable report, worst first.
 
-    Ordering matters more than it sounds. A report that lists artifacts in file order
-    buries the one corrupt column on page four of the output, which is functionally
-    the same as not detecting it.
+    The ordering matters. List artifacts in file order and the one corrupt column
+    ends up on page four of the output, which is about as useful as not finding it.
     """
     results = list(results)
     s = summarise(results)

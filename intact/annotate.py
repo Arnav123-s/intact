@@ -1,37 +1,37 @@
 """
 Annotate — repaired data that still carries its own history.
 
-A repaired dataset that has thrown away the original is not trustworthy, it is just
-corruption you have more confidence in. Six months later nobody remembers which
-values were touched, by what rule, or whether the rule was right — and there is no
-way to find out.
+A repaired dataset that threw away the original is not trustworthy. It is just
+corruption you feel better about. Six months later nobody remembers which values got
+touched, by what rule, or whether the rule was right, and there is no way to find
+out.
 
 So every output here carries three things together:
 
     the repaired value  +  the original  +  why it changed
 
-Nothing is destroyed. Every changed cell is traceable to the rule that changed it,
-every unrepairable finding is annotated in place rather than quietly left, and
-anything needing a human gets queued with the context to decide.
+Nothing gets destroyed. Every changed cell traces back to the rule that changed it,
+every unrepairable finding gets annotated in place instead of quietly left, and
+anything needing a person gets queued with enough context to decide.
 
 Three outputs, for three audiences
 -----------------------------------
-`write_csv`      the repaired table, plus a sidecar provenance file. The table loads
-                 normally in anything; the sidecar answers "what did you change?"
+`write_csv`      the repaired table plus a sidecar provenance file. The table loads
+                 normally in anything. The sidecar answers "what did you change?"
 
 `write_jsonl`    one record per row with per-cell provenance inline. For pipelines
                  that want to carry the history downstream instead of dropping it at
                  the first hop.
 
-`review_sheet`   a markdown sheet of what needs a human, worst first, with enough
+`review_sheet`   a markdown sheet of what needs a person, worst first, with enough
                  context to decide without opening the source file.
 
-Why a sidecar rather than extra columns
-----------------------------------------
-Adding `name__original` beside `name` changes the schema, which breaks every
-downstream consumer that expected the original columns. A separate provenance file
-keeps the repaired table drop-in compatible and puts the history one join away.
-`inline=True` is there for when you would rather have it in the same file.
+Why a sidecar instead of extra columns
+---------------------------------------
+Adding `name__original` next to `name` changes the schema, which breaks every
+downstream consumer expecting the original columns. A separate provenance file keeps
+the repaired table drop-in compatible and puts the history one join away. Use
+`inline=True` when you would rather have it all in one file.
 """
 
 from __future__ import annotations
@@ -94,7 +94,7 @@ class Annotated:
         if review:
             lines.append("")
             lines.append(
-                "Values needing review were NOT changed. They are annotated in place "
+                "Values needing review were NOT changed. They are annotated in place, "
                 "so nothing is lost and nothing is silently accepted."
             )
         return "\n".join(lines)
@@ -178,8 +178,8 @@ def write_csv(
     """Write the repaired table, plus provenance.
 
     Returns (table_path, provenance_path). With `inline=True` the provenance columns
-    are appended to the table instead and no sidecar is written — convenient for a
-    one-off review, disruptive for anything that consumes the schema.
+    get appended to the table instead and no sidecar is written. Handy for a one-off
+    review, disruptive for anything that consumes the schema.
     """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -247,11 +247,11 @@ def write_jsonl(ann: Annotated, path: str | Path) -> Path:
 
 
 def review_sheet(ann: Annotated, path: str | Path | None = None, limit: int = 200) -> str:
-    """A markdown sheet of everything needing a human, worst first.
+    """A markdown sheet of everything needing a person, worst first.
 
-    Ordered so the first thing a reviewer reads is the thing most likely to matter.
-    A sheet in file order buries the one unrecoverable column below three hundred
-    cosmetic fixes, which is the same as not producing it.
+    Ordered so the first thing a reviewer reads is the thing most likely to matter. A
+    sheet in file order buries the one unrecoverable column under three hundred
+    cosmetic fixes, which is about the same as not writing it.
     """
     order = {"unrepairable": 0, "flagged": 1, "repaired": 2}
     items = sorted(
@@ -299,8 +299,8 @@ def review_sheet(ann: Annotated, path: str | Path | None = None, limit: int = 20
             lines += [
                 "## Repaired, but verify",
                 "",
-                "These changes required an inference. They are probably right and "
-                "should be spot-checked before the data is relied on.",
+                "These changes needed an inference. They are probably right, but "
+                "spot-check them before you rely on the data.",
                 "",
                 "| row | column | was | now | rule |",
                 "|---|---|---|---|---|",
