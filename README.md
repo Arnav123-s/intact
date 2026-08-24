@@ -114,6 +114,34 @@ answer any of those. "Which use case is it safe for" can.
 
 ---
 
+## What you need to know before you use it
+
+Not much, and I have tried to keep it that way.
+
+**To run it: Python 3.10 or newer. Nothing else.** No pip install, no dependencies, no
+API key, no network. If you can run `python`, you can run this. Excel files and
+databases work out of the box too, because I read xlsx with `zipfile` and talk to
+databases through whatever driver you already have.
+
+**You do not need to know anything about encodings, or what mojibake is, or what a
+VARCHAR limit does.** That is the whole point. You hand it a file, it tells you what
+is wrong in plain words, and `solve()` hands the data back fixed.
+
+**One thing you do need to decide: what the data is for.** A truncated notes column
+does not matter for a search index and is fatal for an archive. Pass a profile and the
+same measurements get scored against your actual use. If you do not know yet, do not
+pass one, and everything gets reported as measured.
+
+**Read the output, do not obey it.** It is built to be reviewed. A column of genuine
+September dates will look like Excel corruption to it, and it will say so rather than
+quietly deciding for you.
+
+**It never guesses into your data.** Anything that cannot be recovered goes to
+`quarantined` with a reason attached. If you only remember one thing, remember that:
+the good rows move, the bad rows are somewhere specific rather than somewhere unknown.
+
+---
+
 ## Quick start
 
 ```python
@@ -405,10 +433,6 @@ where a column has no single shape. Fixed rules need you to know the failure mod
 advance, but they work regardless of what the rest of the column looks like.
 
 **Each covers the other's blind spot**, which is why both ship.
-
-*(Credit where it's due: the idea for this detector came from someone pointing out
-that a person tends to write dates the same way throughout a document, so a deviation
-is detectable without knowing anything about dates.)*
 
 ---
 
